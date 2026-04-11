@@ -9,6 +9,7 @@ import { Database } from 'bun:sqlite'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { resolveDataDir } from '../storage'
+import type { GraphStatusPayload } from './graph-status-store'
 
 export type LoopInfo = {
   name: string
@@ -127,4 +128,30 @@ export function readLoopByName(projectId: string, loopName: string, dbPathOverri
   } finally {
     try { db?.close() } catch {}
   }
+}
+
+/**
+ * Computes whether the sidebar should poll for updates based on
+ * active worktree loops and transient graph status.
+ * 
+ * Polling continues when:
+ * - There is at least one active worktree loop, OR
+ * - The graph status is in a transient state (initializing or indexing)
+ * 
+ * Polling stops when:
+ * - No active worktree loops AND graph status is terminal (ready, error, unavailable)
+ * 
+ * @param loops - Array of loop states
+ * @param graphStatus - Current graph status payload
+ * @returns true if polling should continue, false otherwise
+ */
+export function shouldPollSidebar(
+  loops: LoopInfo[],
+  graphStatus: GraphStatusPayload | null
+): boolean {
+  const hasActiveWorktreeLoops = loops.some(l => l.active && l.worktree)
+  const isGraphTransient = graphStatus !== null && 
+    (graphStatus.state === 'initializing' || graphStatus.state === 'indexing')
+  
+  return hasActiveWorktreeLoops || isGraphTransient
 }

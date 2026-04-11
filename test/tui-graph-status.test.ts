@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { Database } from 'bun:sqlite'
 import { initializeDatabase, closeDatabase } from '../src/storage'
-import { readGraphStatus, formatGraphStatus, getDbPathForDataDir } from '../src/utils/tui-graph-status'
+import { readGraphStatus, formatGraphStatus, getDbPathForDataDir, isTransient } from '../src/utils/tui-graph-status'
 import { GRAPH_STATUS_KEY } from '../src/utils/graph-status-store'
 import type { GraphStatusPayload } from '../src/utils/graph-status-store'
 
@@ -200,6 +200,59 @@ describe('TUI graph status helper', () => {
       const result = formatGraphStatus(null)
       expect(result.text).toBe('unavailable')
       expect(result.color).toBe('textMuted')
+    })
+  })
+
+  describe('isTransient', () => {
+    test('should return true for initializing state', () => {
+      const status: GraphStatusPayload = {
+        state: 'initializing',
+        ready: false,
+        updatedAt: Date.now(),
+      }
+      expect(isTransient(status)).toBe(true)
+    })
+
+    test('should return true for indexing state', () => {
+      const status: GraphStatusPayload = {
+        state: 'indexing',
+        ready: false,
+        updatedAt: Date.now(),
+      }
+      expect(isTransient(status)).toBe(true)
+    })
+
+    test('should return false for ready state', () => {
+      const status: GraphStatusPayload = {
+        state: 'ready',
+        ready: true,
+        stats: { files: 10, symbols: 50, edges: 100, calls: 25 },
+        updatedAt: Date.now(),
+      }
+      expect(isTransient(status)).toBe(false)
+    })
+
+    test('should return false for error state', () => {
+      const status: GraphStatusPayload = {
+        state: 'error',
+        ready: false,
+        message: 'Worker initialization failed',
+        updatedAt: Date.now(),
+      }
+      expect(isTransient(status)).toBe(false)
+    })
+
+    test('should return false for unavailable state', () => {
+      const status: GraphStatusPayload = {
+        state: 'unavailable',
+        ready: false,
+        updatedAt: Date.now(),
+      }
+      expect(isTransient(status)).toBe(false)
+    })
+
+    test('should return false for null', () => {
+      expect(isTransient(null)).toBe(false)
     })
   })
 })

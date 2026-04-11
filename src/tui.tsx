@@ -15,7 +15,7 @@ import { extractPlanTitle, PLAN_EXECUTION_LABELS, matchExecutionLabel } from './
 import { launchFreshLoop } from './utils/loop-launch'
 import { readPlan, writePlan, deletePlan } from './utils/tui-plan-store'
 import { readGraphStatus, formatGraphStatus } from './utils/tui-graph-status'
-import { readLoopStates, readLoopByName, type LoopInfo } from './utils/tui-refresh-helpers'
+import { readLoopStates, readLoopByName, shouldPollSidebar, type LoopInfo } from './utils/tui-refresh-helpers'
 
 import { LOOP_PERMISSION_RULESET } from './constants/loop'
 
@@ -742,6 +742,7 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
   const [loops, setLoops] = createSignal<LoopInfo[]>([])
   const [hasPlan, setHasPlan] = createSignal(false)
   const [graphStatusFormatted, setGraphStatusFormatted] = createSignal<ReturnType<typeof formatGraphStatus> | null>(null)
+  const [graphStatusRaw, setGraphStatusRaw] = createSignal<ReturnType<typeof readGraphStatus> | null>(null)
   const theme = () => props.api.theme.current
   const directory = props.api.state.path.directory
   const pid = resolveProjectId(directory)
@@ -775,6 +776,7 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
    * - session.status events
    * - Loop/plan mutation actions (save, delete, execute, cancel, restart)
    * - Periodic polling for active worktree loops (5s interval)
+   * - Periodic polling for transient graph states (5s interval)
    * - Manual onRefresh callbacks from dialogs
    */
   function refreshSidebarData() {
@@ -803,6 +805,7 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
     
     // Refresh graph status from KV
     const status = readGraphStatus(pid)
+    setGraphStatusRaw(status)
     setGraphStatusFormatted(formatGraphStatus(status))
   }
   
@@ -831,8 +834,8 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
   refreshSidebarData()
 
   createEffect(() => {
-    const hasActiveWorktreeLoops = loops().filter(l => l.active && l.worktree).length > 0
-    if (hasActiveWorktreeLoops) {
+    // Use the shared shouldPollSidebar helper for consistent polling logic
+    if (shouldPollSidebar(loops(), graphStatusRaw())) {
       startPolling()
     } else {
       stopPolling()

@@ -64,6 +64,22 @@ export function readGraphStatus(projectId: string, dbPathOverride?: string): Gra
 }
 
 /**
+ * Determines if the current graph status is still in-flight (transient).
+ * Transient states indicate the graph is still being built and should
+ * trigger continued sidebar refresh polling.
+ * 
+ * Terminal states (ready, error, unavailable, null) do not require
+ * continued polling unless there are active worktree loops.
+ * 
+ * @param status - The graph status payload or null
+ * @returns true if status is initializing or indexing, false otherwise
+ */
+export function isTransient(status: GraphStatusPayload | null): boolean {
+  if (!status) return false
+  return status.state === 'initializing' || status.state === 'indexing'
+}
+
+/**
  * Formats graph status for display in the TUI sidebar.
  * Returns the state text and color based solely on the persisted graph state.
  * 
