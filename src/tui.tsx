@@ -833,8 +833,14 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 
   refreshSidebarData()
 
+  // Re-check after a short delay to catch graph status that wasn't written yet at mount time
+  const initTimer = setTimeout(() => {
+    if (!graphStatusRaw()) {
+      refreshSidebarData()
+    }
+  }, 2000)
+
   createEffect(() => {
-    // Use the shared shouldPollSidebar helper for consistent polling logic
     if (shouldPollSidebar(loops(), graphStatusRaw())) {
       startPolling()
     } else {
@@ -845,6 +851,7 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
   onCleanup(() => {
     unsub()
     stopPolling()
+    clearTimeout(initTimer)
   })
 
   const hasContent = createMemo(() => {

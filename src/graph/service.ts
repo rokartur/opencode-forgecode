@@ -239,20 +239,24 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
       if (!initialized) {
         await initialize()
       }
-      
-      // Emit indexing status before starting the scan
+
       emitStatus('indexing')
-      
-      await client.scan()
-      
-      // Emit ready status after scan completes
-      const stats = await client.getStats()
-      emitStatus('ready', {
-        files: stats.files,
-        symbols: stats.symbols,
-        edges: stats.edges,
-        calls: stats.calls,
-      })
+
+      try {
+        await client.scan()
+
+        const stats = await client.getStats()
+        emitStatus('ready', {
+          files: stats.files,
+          symbols: stats.symbols,
+          edges: stats.edges,
+          calls: stats.calls,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        emitStatus('error', undefined, msg)
+        throw err
+      }
     },
 
     async close(): Promise<void> {
