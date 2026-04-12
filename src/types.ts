@@ -106,6 +106,8 @@ export interface GraphConfig {
   maxFiles?: number
   watch?: boolean
   debounceMs?: number
+  /** RPC timeout in milliseconds. Default: 120000 (120 seconds) */
+  rpcTimeoutMs?: number
 }
 
 export interface PluginConfig {

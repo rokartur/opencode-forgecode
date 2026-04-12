@@ -115,6 +115,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
           watch: config.graph?.watch ?? true,
           debounceMs: config.graph?.debounceMs,
           maxFiles: config.graph?.maxFiles,
+          rpcTimeoutMs: config.graph?.rpcTimeoutMs,
           onStatusChange: graphStatusCallback,
         })
         

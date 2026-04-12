@@ -57,6 +57,7 @@ interface GraphServiceConfig {
   watch?: boolean
   debounceMs?: number
   maxFiles?: number
+  rpcTimeoutMs?: number
   onStatusChange?: GraphStatusCallback
 }
 
@@ -69,7 +70,7 @@ interface PendingChange {
 const DEFAULT_DEBOUNCE_MS = 500
 
 export function createGraphService(config: GraphServiceConfig): GraphService {
-  const { projectId, dataDir, cwd, logger, watch: watchEnabled, debounceMs, maxFiles, onStatusChange } = config
+  const { projectId, dataDir, cwd, logger, watch: watchEnabled, debounceMs, maxFiles, rpcTimeoutMs, onStatusChange } = config
   const client = new GraphClient()
   let dbPath: string | null = null
   let initialized = false
@@ -401,6 +402,7 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
           GRAPH_DB_PATH: dbPath,
           GRAPH_CWD: cwd,
           GRAPH_MAX_FILES: maxFiles?.toString() ?? '',
+          GRAPH_RPC_TIMEOUT_MS: (rpcTimeoutMs ?? 120000).toString(),
         },
       })
 
