@@ -6,7 +6,7 @@ import { createLogger } from '../../utils/logger'
 import { createGraphStatusCallback } from '../../utils/graph-status-store'
 import { readGraphStatus } from '../../utils/tui-graph-status'
 import { confirm } from '../utils'
-import { enumerateGraphCache, deleteGraphCacheDir } from '../../storage/graph-projects'
+import { enumerateGraphCache, deleteGraphCacheDir, type GraphCacheEntry } from '../../storage/graph-projects'
 
 export interface GraphArgs {
   dbPath?: string
@@ -15,6 +15,21 @@ export interface GraphArgs {
   action: 'status' | 'scan' | 'list' | 'remove'
   target?: string
   yes?: boolean
+}
+
+function formatScope(entry: GraphCacheEntry): string {
+  return entry.cwdScope || 'legacy/unscoped'
+}
+
+function resolveTargetEntries(identifier: string, dataDir?: string): GraphCacheEntry[] {
+  const entries = enumerateGraphCache(dataDir)
+  const hashMatch = entries.find(entry => entry.hashDir === identifier)
+
+  if (hashMatch) {
+    return [hashMatch]
+  }
+
+  return entries.filter(entry => entry.projectId === identifier)
 }
 
 function printStatus(projectId: string, dbPath?: string): void {
@@ -57,6 +72,7 @@ function printList(dataDir?: string): void {
     
     console.log(`  ${entry.hashDir}`)
     console.log(`    Project: ${displayName} (${statusLabel})`)
+    console.log(`    Scope: ${formatScope(entry)}`)
     console.log(`    Path: ${entry.graphDbPath}`)
     console.log(`    Size: ${sizeKb} KB`)
     console.log(`    Modified: ${mtime}`)
@@ -65,13 +81,23 @@ function printList(dataDir?: string): void {
 }
 
 async function printRemove(identifier: string, dataDir?: string, requireConfirm: boolean = true): Promise<void> {
-  const entries = enumerateGraphCache(dataDir)
-  const targetEntry = entries.find(e => e.projectId === identifier || e.hashDir === identifier)
+  const targetEntries = resolveTargetEntries(identifier, dataDir)
   
-  if (!targetEntry) {
+  if (targetEntries.length === 0) {
     console.error(`Graph cache entry not found: ${identifier}`)
     process.exit(1)
   }
+
+  if (targetEntries.length > 1) {
+    console.error(`Multiple graph cache entries found for project ID: ${identifier}`)
+    console.error('Use the hash directory to remove a specific cache entry:')
+    for (const entry of targetEntries) {
+      console.error(`  ${entry.hashDir} (${formatScope(entry)})`)
+    }
+    process.exit(1)
+  }
+
+  const [targetEntry] = targetEntries
 
   const displayName = targetEntry.projectName || targetEntry.projectId || targetEntry.hashDir
   const statusLabel = targetEntry.resolutionStatus === 'known' ? 'known' : 'unknown'
@@ -79,6 +105,7 @@ async function printRemove(identifier: string, dataDir?: string, requireConfirm:
   console.log('Graph Cache Entry to Remove:')
   console.log(`  Hash: ${targetEntry.hashDir}`)
   console.log(`  Project: ${displayName} (${statusLabel})`)
+  console.log(`  Scope: ${formatScope(targetEntry)}`)
   console.log(`  Path: ${targetEntry.graphDbPath}`)
   console.log('')
 
