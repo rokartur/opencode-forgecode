@@ -11,7 +11,7 @@ export const codeAgent: AgentDefinition = {
     question: 'allow',
   },
   tools: {
-    exclude: ['review-delete','plan-execute', 'plan-write', 'plan-edit', 'loop', 'graph-status'] 
+    exclude: ['review-delete','plan-execute', 'plan-write', 'plan-edit', 'loop'] 
   },
   systemPrompt: `You are a coding agent that helps users with software engineering tasks.
 

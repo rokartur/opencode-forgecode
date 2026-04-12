@@ -6,6 +6,7 @@ const z = tool.schema
 
 interface GraphToolContext {
   graphService: GraphService | null
+  kvService: ToolContext['kvService']
 }
 
 export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<string, ReturnType<typeof tool>> {
@@ -26,6 +27,17 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
           switch (args.action) {
             case 'status': {
               if (!graphService.ready) {
+                // Check KV store for actual state (indexing, initializing, etc.)
+                const status = ctx.kvService.get<{ state: string; message?: string; stats?: { files: number; symbols: number; edges: number; calls: number } }>(ctx.projectId, 'graph:status')
+                if (status) {
+                  const stateMsg = status.state === 'indexing' && status.message
+                    ? status.message
+                    : `State: ${status.state}`
+                  const statsMsg = status.stats
+                    ? `\nStats so far:\n- Files: ${status.stats.files}\n- Symbols: ${status.stats.symbols}`
+                    : ''
+                  return `Graph Status: ${stateMsg}${statsMsg}\nReady: false`
+                }
                 return 'Graph service is not ready. Worker may be unavailable or initialization failed.'
               }
               const stats = await graphService.getStats()

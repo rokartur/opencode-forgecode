@@ -36,17 +36,19 @@ Add to your `opencode.json`:
 
 ## Agents
 
-The plugin bundles four agents that integrate with the graph system:
+The plugin bundles three agents that integrate with the graph system:
 
 | Agent | Mode | Description |
 |-------|------|-------------|
-| **code** | primary | Primary coding agent with graph awareness. Checks the code graph before unfamiliar code, stores architectural decisions and conventions as it works. |
-| **architect** | primary | Read-only planning agent. Researches the codebase, designs implementation plans, then hands off to code via `plan-execute`. |
+| **code** | primary | Primary coding agent with graph-first code discovery. Uses graph tools to explore code structure before diving into unfamiliar code. |
+| **architect** | primary | Read-only planning agent. Researches the codebase using graph-first discovery, designs implementation plans, and caches them for user approval before execution. |
 | **auditor** | subagent | Read-only code auditor with access to project graph for convention-aware reviews. Invoked via Task tool to review diffs, commits, branches, or PRs against stored conventions and decisions. |
 
 The auditor agent is a read-only subagent (`temperature: 0.0`) that can read the graph but cannot write, edit, or delete graph entries or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
 
-The architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with message-level enforcement via the `experimental.chat.messages.transform` hook. Plans are built incrementally in the KV store during the planning session. After approval, execution is dispatched programmatically — no additional LLM calls are needed. The user can view and edit the cached plan from the sidebar or command palette before or during execution. 
+**Tool restrictions:** The auditor cannot use `plan-write`, `plan-edit`, `plan-execute`, or `loop` tools to prevent interference with active workflows.
+
+The architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with message-level enforcement via the `experimental.chat.messages.transform` hook. Plans are built incrementally in the KV store during the planning session. After user approval via the question tool, execution is dispatched programmatically — no additional LLM calls are needed. The user can view and edit the cached plan from the sidebar or command palette before or during execution. 
 
 
 ## Tools
