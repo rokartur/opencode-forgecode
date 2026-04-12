@@ -30,7 +30,7 @@ Add to your `opencode.json`:
 - **Iterative Development Loops** - Autonomous coding/auditing loop with optional worktree isolation, session rotation, stall detection, and review finding persistence
 - **Session Plan Storage** - Session-scoped plan storage with 7-day TTL for managing implementation plans
 - **Review Finding Persistence** - Store and retrieve audit findings across session rotations
-- **Bundled Agents** - Ships with Code, Architect, Auditor and Librarian agents preconfigured for graph-aware workflows
+- **Bundled Agents** - Ships with Code, Architect, and Auditor agents preconfigured for graph-aware workflows
 - **CLI Tools** - Loop status, cancel, restart, graph status, graph scan, and upgrade commands via `opencode-forge`
 - **Docker Sandbox** - Run loops inside isolated Docker containers with bind-mounted project directory, automatic container lifecycle, and selective tool routing (bash, glob, grep)
 
@@ -388,6 +388,7 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 - `graph.watch` - Watch for file changes (default: `true`)
 - `graph.debounceMs` - Debounce delay for file watch events (default: `100`)
 - `graph.maxFiles` - Maximum files to index (default: `1000`)
+- `graph.rpcTimeoutMs` - RPC timeout in milliseconds for graph worker communication (default: `120000`)
 
 #### TUI
 - `tui.sidebar` - Show the forge sidebar widget in OpenCode TUI (default: `true`)
