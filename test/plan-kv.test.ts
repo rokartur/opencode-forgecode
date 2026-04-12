@@ -41,7 +41,7 @@ describe('plan-write', () => {
       kvService,
       projectId: 'test-project',
       logger: mockLogger,
-      loopService: { resolveWorktreeName: () => null } as any,
+      loopService: { resolveLoopName: () => null } as any,
       directory: TEST_DIR,
       sessionID: 'test-session',
       config: {} as any,
@@ -108,7 +108,7 @@ describe('plan-edit', () => {
       kvService,
       projectId: 'test-project',
       logger: mockLogger,
-      loopService: { resolveWorktreeName: () => null } as any,
+      loopService: { resolveLoopName: () => null } as any,
       directory: TEST_DIR,
       sessionID: 'test-session',
       config: {} as any,
@@ -211,7 +211,7 @@ describe('plan-read', () => {
       kvService,
       projectId: 'test-project',
       logger: mockLogger,
-      loopService: { resolveWorktreeName: () => null } as any,
+      loopService: { resolveLoopName: () => null } as any,
       directory: TEST_DIR,
       sessionID: 'test-session',
       config: {} as any,
@@ -325,7 +325,7 @@ describe('plan-read with loop session', () => {
       projectId: 'test-project',
       logger: mockLogger,
       loopService: {
-        resolveWorktreeName: (sessionID: string) =>
+        resolveLoopName: (sessionID: string) =>
           sessionID === 'loop-session-123' ? 'my-loop' : null,
       } as any,
       directory: TEST_DIR,

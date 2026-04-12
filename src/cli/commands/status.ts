@@ -7,7 +7,7 @@ import { findPartialMatch, filterByPartial } from '../../utils/partial-match'
 
 interface LoopInfo {
   sessionId: string
-  worktreeName: string
+  loopName: string
   worktreeBranch?: string
   iteration: number
   maxIterations: number
@@ -81,9 +81,9 @@ export async function run(argv: StatusArgs): Promise<void> {
           console.error(`Failed to parse loop state for key ${row.key}:`, err)
         }
       }
-      const filtered = filterByPartial(argv.listWorktreesFilter, states, (s) => [s.worktreeName, s.worktreeBranch])
+      const filtered = filterByPartial(argv.listWorktreesFilter, states, (s) => [s.loopName, s.worktreeBranch])
       for (const state of filtered) {
-        console.log(state.worktreeName)
+        console.log(state.loopName)
       }
       db.close()
       return
@@ -116,10 +116,10 @@ export async function run(argv: StatusArgs): Promise<void> {
     for (const row of rows) {
       try {
         const state = JSON.parse(row.data) as LoopState
-        if (state.active && state.sessionId && state.worktreeName && state.iteration != null && state.maxIterations != null && state.phase && state.startedAt) {
+        if (state.active && state.sessionId && state.loopName && state.iteration != null && state.maxIterations != null && state.phase && state.startedAt) {
           activeLoops.push({
             sessionId: state.sessionId,
-            worktreeName: state.worktreeName,
+            loopName: state.loopName,
             worktreeBranch: state.worktreeBranch,
             iteration: state.iteration,
             maxIterations: state.maxIterations,
@@ -133,24 +133,24 @@ export async function run(argv: StatusArgs): Promise<void> {
       } catch {}
     }
 
-    const worktreeName = argv.name
+      const loopName = argv.name
 
-    if (worktreeName) {
+    if (loopName) {
       type LoopUnion = { type: 'active'; loop: LoopInfo } | { type: 'recent'; loop: typeof recentLoops[number] }
       const allLoops: LoopUnion[] = [
         ...activeLoops.map((l) => ({ type: 'active' as const, loop: l })),
         ...recentLoops.map((l) => ({ type: 'recent' as const, loop: l })),
       ]
 
-      const { match, candidates } = findPartialMatch(worktreeName, allLoops, (l) => [
-        l.type === 'active' ? l.loop.worktreeName : l.loop.state.worktreeName,
+      const { match, candidates } = findPartialMatch(loopName, allLoops, (l) => [
+        l.type === 'active' ? l.loop.loopName : l.loop.state.loopName,
         l.type === 'active' ? l.loop.worktreeBranch : l.loop.state.worktreeBranch,
       ])
 
       if (!match && candidates.length > 0) {
-        console.error(`Multiple loops match '${worktreeName}':`)
+        console.error(`Multiple loops match '${loopName}':`)
         for (const c of candidates) {
-          const name = c.type === 'active' ? c.loop.worktreeName : c.loop.state.worktreeName
+          const name = c.type === 'active' ? c.loop.loopName : c.loop.state.loopName
           console.error(`  - ${name}`)
         }
         console.error('')
@@ -158,18 +158,18 @@ export async function run(argv: StatusArgs): Promise<void> {
       }
 
       if (!match && candidates.length === 0) {
-        console.error(`Loop not found: ${worktreeName}`)
+        console.error(`Loop not found: ${loopName}`)
         console.error('')
         if (activeLoops.length > 0) {
           console.error('Active loops:')
           for (const l of activeLoops) {
-            console.error(`  - ${l.worktreeName}`)
+            console.error(`  - ${l.loopName}`)
           }
         }
         if (recentLoops.length > 0) {
           console.error('Recently completed:')
           for (const l of recentLoops) {
-            console.error(`  - ${l.state.worktreeName}`)
+            console.error(`  - ${l.state.loopName}`)
           }
         }
         console.error('')
@@ -177,22 +177,22 @@ export async function run(argv: StatusArgs): Promise<void> {
       }
 
       const matchedLoop = match!
-      const resolvedWorktreeName = matchedLoop.type === 'active'
-        ? matchedLoop.loop.worktreeName
-        : matchedLoop.loop.state.worktreeName
+      const resolvedLoopName = matchedLoop.type === 'active'
+        ? matchedLoop.loop.loopName
+        : matchedLoop.loop.state.loopName
 
       if (matchedLoop.type === 'active') {
         const row = rows.find((r) => {
           try {
             const state = JSON.parse(r.data) as LoopState
-            return state.worktreeName === resolvedWorktreeName
+            return state.loopName === resolvedLoopName
           } catch {
             return false
           }
         })
 
         if (!row) {
-          console.error(`Failed to retrieve state for: ${worktreeName}`)
+          console.error(`Failed to retrieve state for: ${loopName}`)
           process.exit(1)
         }
 
@@ -204,9 +204,9 @@ export async function run(argv: StatusArgs): Promise<void> {
         const seconds = Math.floor((duration % (1000 * 60)) / 1000)
 
         console.log('')
-        console.log(`Loop: ${state.worktreeName}`)
+        console.log(`Loop: ${state.loopName}`)
         console.log(`  Session ID:      ${state.sessionId}`)
-        console.log(`  Worktree:        ${state.worktreeName}`)
+        console.log(`  Loop Name:       ${state.loopName}`)
         if (state.worktreeBranch) {
           console.log(`  Branch:          ${state.worktreeBranch}`)
         }
@@ -250,9 +250,9 @@ export async function run(argv: StatusArgs): Promise<void> {
         const seconds = Math.floor((duration % (1000 * 60)) / 1000)
 
         console.log('')
-        console.log(`Loop (Completed): ${state.worktreeName}`)
+        console.log(`Loop (Completed): ${state.loopName}`)
         console.log(`  Session ID:      ${state.sessionId}`)
-        console.log(`  Worktree:        ${state.worktreeName}`)
+        console.log(`  Loop Name:       ${state.loopName}`)
         if (state.worktreeBranch) {
           console.log(`  Branch:          ${state.worktreeBranch}`)
         }
@@ -294,7 +294,7 @@ export async function run(argv: StatusArgs): Promise<void> {
           const iterStr = `${loop.iteration}/${loop.maxIterations}`
           const audit = loop.audit ? 'Yes' : 'No'
 
-          console.log(`  ${loop.worktreeName}`)
+          console.log(`  ${loop.loopName}`)
           console.log(`    Phase: ${loop.phase}  Iteration: ${iterStr}  Duration: ${durationStr}  Audit: ${audit}`)
           console.log('')
         }
@@ -313,7 +313,7 @@ export async function run(argv: StatusArgs): Promise<void> {
           const reason = loop.state.terminationReason ?? 'unknown'
           const completed = new Date(loop.state.completedAt!).toLocaleString()
 
-          console.log(`  ${loop.state.worktreeName}`)
+          console.log(`  ${loop.state.loopName}`)
           console.log(`    Iterations: ${loop.state.iteration}  Reason: ${reason}  Completed: ${completed}`)
           console.log('')
         }

@@ -27,7 +27,7 @@ export interface FreshLoopOptions {
 export interface LaunchResult {
   sessionId: string
   loopName: string
-  worktreeName: string
+  executionName: string
   isWorktree: boolean
   worktreeDir?: string
   worktreeBranch?: string
@@ -59,8 +59,8 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
       for (const row of rows) {
         try {
           const state = JSON.parse(row.data)
-          if (state?.worktreeName) {
-            existingNames.push(state.worktreeName)
+          if (state?.loopName) {
+            existingNames.push(state.loopName)
           }
         } catch {
           // Skip invalid JSON
@@ -138,7 +138,7 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
       const loopState = {
         active: true,
         sessionId,
-        worktreeName: uniqueWorktreeName,
+        loopName: uniqueWorktreeName,
         worktreeDir: sessionDirectory,
         worktreeBranch,
         iteration: 1,
@@ -185,7 +185,7 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
   return {
     sessionId,
     loopName: displayName,
-    worktreeName: uniqueWorktreeName,
+    executionName: uniqueWorktreeName,
     isWorktree,
     worktreeDir: sessionDirectory,
     worktreeBranch,

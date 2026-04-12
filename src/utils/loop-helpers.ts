@@ -5,9 +5,9 @@ import { parseModelString } from './model-fallback'
 export function resolveLoopModel(
   config: PluginConfig,
   loopService: LoopService,
-  worktreeName: string,
+  loopName: string,
 ): { providerID: string; modelID: string } | undefined {
-  const state = loopService.getActiveState(worktreeName)
+  const state = loopService.getActiveState(loopName)
   if (state?.modelFailed) return undefined
   return parseModelString(config.loop?.model) ?? parseModelString(config.executionModel)
 }

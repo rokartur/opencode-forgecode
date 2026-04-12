@@ -7,9 +7,9 @@ export function createPlanTools(ctx: ToolContext): Record<string, ReturnType<typ
   const { kvService, projectId, logger, loopService } = ctx
 
   function resolvePlanKey(sessionID: string): string {
-    const worktreeName = loopService.resolveWorktreeName(sessionID)
-    if (worktreeName) {
-      return `plan:${worktreeName}`
+    const loopName = loopService.resolveLoopName(sessionID)
+    if (loopName) {
+      return `plan:${loopName}`
     }
     return `plan:${sessionID}`
   }

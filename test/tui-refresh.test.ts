@@ -56,7 +56,7 @@ describe('TUI Refresh Behavior', () => {
       const now = Date.now()
       const ttl = 7 * 24 * 60 * 60 * 1000
       const loopState = {
-        worktreeName: 'test-loop',
+        loopName: 'test-loop',
         sessionId: 'test-session-123',
         phase: 'coding',
         iteration: 1,
@@ -82,7 +82,7 @@ describe('TUI Refresh Behavior', () => {
       const ttl = 7 * 24 * 60 * 60 * 1000
       
       const activeLoop = {
-        worktreeName: 'active-loop',
+        loopName: 'active-loop',
         sessionId: 'session-1',
         phase: 'coding',
         iteration: 1,
@@ -90,7 +90,7 @@ describe('TUI Refresh Behavior', () => {
       }
       
       const expiredLoop = {
-        worktreeName: 'expired-loop',
+        loopName: 'expired-loop',
         sessionId: 'session-2',
         phase: 'coding',
         iteration: 1,
@@ -115,7 +115,7 @@ describe('TUI Refresh Behavior', () => {
       const ttl = 7 * 24 * 60 * 60 * 1000
 
       const inactiveLoop = {
-        worktreeName: 'inactive-loop',
+        loopName: 'inactive-loop',
         sessionId: 'session-1',
         phase: 'coding',
         iteration: 1,
@@ -124,7 +124,7 @@ describe('TUI Refresh Behavior', () => {
       }
       
       const activeLoop = {
-        worktreeName: 'active-loop',
+        loopName: 'active-loop',
         sessionId: 'session-2',
         phase: 'coding',
         iteration: 1,
@@ -156,7 +156,7 @@ describe('TUI Refresh Behavior', () => {
       const now = Date.now()
       const ttl = 7 * 24 * 60 * 60 * 1000
       const loopState = {
-        worktreeName: 'specific-loop',
+        loopName: 'specific-loop',
         sessionId: 'test-session-456',
         phase: 'auditing',
         iteration: 2,
@@ -186,7 +186,7 @@ describe('TUI Refresh Behavior', () => {
       const now = Date.now()
       const expiredTime = now - 1000
       const loopState = {
-        worktreeName: 'expired-loop',
+        loopName: 'expired-loop',
         sessionId: 'test-session',
         phase: 'coding',
         iteration: 1,
@@ -226,7 +226,7 @@ describe('TUI Refresh Behavior', () => {
       const oldTime = now - 10 * 60 * 1000 // 10 minutes ago
       
       const oldActiveLoop = {
-        worktreeName: 'old-active-loop',
+        loopName: 'old-active-loop',
         sessionId: 'session-old',
         phase: 'coding',
         iteration: 1,
@@ -252,7 +252,7 @@ describe('TUI Refresh Behavior', () => {
       const oldCutoff = now - 6 * 60 * 1000 // 6 minutes ago (beyond 5 min cutoff)
 
       const oldInactiveLoop = {
-        worktreeName: 'old-inactive-loop',
+        loopName: 'old-inactive-loop',
         sessionId: 'session-old',
         phase: 'coding',
         iteration: 1,

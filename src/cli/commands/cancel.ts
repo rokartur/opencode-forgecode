@@ -69,14 +69,14 @@ export async function run(argv: CancelArgs): Promise<void> {
 
     if (argv.name) {
       const { match, candidates } = findPartialMatch(argv.name, loops, (l) => [
-        l.state.worktreeName,
+        l.state.loopName,
         l.state.worktreeBranch,
       ])
 
       if (!match && candidates.length > 0) {
         console.error(`Multiple loops match '${argv.name}':`)
         for (const c of candidates) {
-          console.error(`  - ${c.state.worktreeName}`)
+          console.error(`  - ${c.state.loopName}`)
         }
         console.error('')
         process.exit(1)
@@ -87,7 +87,7 @@ export async function run(argv: CancelArgs): Promise<void> {
         console.error('')
         console.error('Active loops:')
         for (const l of loops) {
-          console.error(`  - ${l.state.worktreeName}`)
+          console.error(`  - ${l.state.loopName}`)
         }
         console.error('')
         process.exit(1)
@@ -102,7 +102,7 @@ export async function run(argv: CancelArgs): Promise<void> {
         console.log('Multiple active loops. Please specify which one to cancel:')
         console.log('')
         for (const l of loops) {
-          console.log(`  - ${l.state.worktreeName}`)
+          console.log(`  - ${l.state.loopName}`)
         }
         console.log('')
         console.log("Run 'oc-forge loop cancel <name>' to cancel a specific loop.")
@@ -120,7 +120,7 @@ export async function run(argv: CancelArgs): Promise<void> {
 
     console.log('')
     console.log(`Loop to Cancel:`)
-    console.log(`  Worktree:  ${state.worktreeName}`)
+    console.log(`  Loop:     ${state.loopName}`)
     console.log(`  Session:   ${state.sessionId}`)
     console.log(`  Iteration: ${state.iteration}/${state.maxIterations}`)
     console.log(`  Phase:     ${state.phase}`)
@@ -129,7 +129,7 @@ export async function run(argv: CancelArgs): Promise<void> {
     }
     console.log('')
 
-    const shouldProceed = argv.force || await confirm(`Cancel loop '${state.worktreeName}'`)
+    const shouldProceed = argv.force || await confirm(`Cancel loop '${state.loopName}'`)
 
     if (!shouldProceed) {
       console.log('Cancelled.')
@@ -149,7 +149,7 @@ export async function run(argv: CancelArgs): Promise<void> {
       loopToCancel.row.key,
     )
 
-    console.log(`Cancelled loop: ${state.worktreeName}`)
+    console.log(`Cancelled loop: ${state.loopName}`)
 
     if (argv.cleanup && state.worktreeDir && state.worktree) {
       if (existsSync(state.worktreeDir)) {

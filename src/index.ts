@@ -60,7 +60,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
       logger.error('Failed to migrate ralph: KV entries', err)
     }
 
-    const activeSandboxLoops = loopService.listActive().filter(s => s.sandbox && s.worktreeName)
+    const activeSandboxLoops = loopService.listActive().filter(s => s.sandbox && s.loopName)
 
     const reconciledCount = loopService.reconcileStale()
     if (reconciledCount > 0) {
@@ -81,16 +81,16 @@ export function createForgePlugin(config: PluginConfig): Plugin {
     }
 
     if (sandboxManager) {
-      const preserveWorktrees = activeSandboxLoops.map(s => s.worktreeName)
-      sandboxManager.cleanupOrphans(preserveWorktrees).then(async (count) => {
+      const preserveLoops = activeSandboxLoops.map(s => s.loopName!).filter(Boolean)
+      sandboxManager.cleanupOrphans(preserveLoops).then(async (count) => {
         if (count > 0) logger.log(`Cleaned up ${count} orphaned sandbox container(s)`)
         for (const loop of activeSandboxLoops) {
           try {
-            await sandboxManager!.restore(loop.worktreeName, loop.worktreeDir, loop.startedAt)
-            loopService.setState(loop.worktreeName, { ...loop, active: true })
-            logger.log(`Restored sandbox and reactivated loop for ${loop.worktreeName}`)
+            await sandboxManager!.restore(loop.loopName!, loop.worktreeDir, loop.startedAt)
+            loopService.setState(loop.loopName!, { ...loop, active: true })
+            logger.log(`Restored sandbox and reactivated loop for ${loop.loopName}`)
           } catch (err) {
-            logger.error(`Failed to restore sandbox for ${loop.worktreeName}`, err)
+            logger.error(`Failed to restore sandbox for ${loop.loopName}`, err)
           }
         }
       }).catch((err) => logger.error('Failed to cleanup orphaned containers', err))
@@ -150,11 +150,11 @@ export function createForgePlugin(config: PluginConfig): Plugin {
         for (const state of activeLoops) {
           if (state.sandbox && sandboxManager) {
             try {
-              await sandboxManager.stop(state.worktreeName)
-              logger.log(`Cleanup: stopped sandbox for ${state.worktreeName}`)
-            } catch (err) {
-              logger.error(`Cleanup: failed to stop sandbox for ${state.worktreeName}`, err)
-            }
+               await sandboxManager.stop(state.loopName!)
+               logger.log(`Cleanup: stopped sandbox for ${state.loopName}`)
+             } catch (err) {
+               logger.error(`Cleanup: failed to stop sandbox for ${state.loopName}`, err)
+             }
           }
         }
       }
@@ -241,16 +241,16 @@ export function createForgePlugin(config: PluginConfig): Plugin {
         await graphCommandHook(eventInput)
       },
       'tool.execute.before': async (input, output) => {
-        const worktree = loopService.resolveWorktreeName(input.sessionID)
-        if (worktree) {
-          logger.log(`[tool-before] ${input.tool} callID=${input.callID} session=${input.sessionID} worktree=${worktree}`)
+        const loopName = loopService.resolveLoopName(input.sessionID)
+        if (loopName) {
+          logger.log(`[tool-before] ${input.tool} callID=${input.callID} session=${input.sessionID} loop=${loopName}`)
         }
         await toolExecuteBeforeHook!(input, output)
         await sandboxBeforeHook!(input, output)
       },
       'tool.execute.after': async (input, output) => {
-        const worktree = loopService.resolveWorktreeName(input.sessionID)
-        if (worktree) {
+        const loopName = loopService.resolveLoopName(input.sessionID)
+        if (loopName) {
           logger.log(`[tool-after] ${input.tool} callID=${input.callID} output=${output.output?.slice(0, 200)}`)
         }
         await sandboxAfterHook!(input, output)
@@ -258,8 +258,8 @@ export function createForgePlugin(config: PluginConfig): Plugin {
         await graphAfterHook!(input, output)
       },
       'permission.ask': async (input, output) => {
-        const worktreeName = loopService.resolveWorktreeName(input.sessionID)
-        const state = worktreeName ? loopService.getActiveState(worktreeName) : null
+        const loopName = loopService.resolveLoopName(input.sessionID)
+        const state = loopName ? loopService.getActiveState(loopName) : null
         if (!state?.active) return
 
         const patterns = Array.isArray(input.pattern) ? input.pattern : (input.pattern ? [input.pattern] : [])

@@ -1,8 +1,10 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { createKvQuery } from '../src/storage/kv-queries'
 import { createKvService } from '../src/services/kv'
 import { createLoopService, migrateRalphKeys, buildCompletionSignalInstructions, fetchSessionOutput, type LoopState, generateUniqueName } from '../src/services/loop'
+import { createLoopTools } from '../src/tools/loop'
+import { createPlanTools } from '../src/tools/plan-kv'
 
 const TEST_DIR = '/tmp/opencode-manager-loop-test-' + Date.now()
 
@@ -51,7 +53,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-123',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
@@ -67,7 +69,7 @@ describe('LoopService', () => {
 
     loopService.setState('session-123', state)
     const retrieved = loopService.getActiveState('session-123')
-    expect(retrieved).toEqual(state)
+    expect(retrieved).toEqual({ ...state, loopName: state.loopName })
 
     loopService.setState('session-123', { ...state, iteration: 2 })
     const updated = loopService.getActiveState('session-123')
@@ -82,7 +84,7 @@ describe('LoopService', () => {
     const inactiveState = {
       active: false,
       sessionId: 'session-456',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
@@ -135,7 +137,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-789',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 3,
@@ -158,7 +160,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-789',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
@@ -180,7 +182,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-789',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 2,
@@ -202,7 +204,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-789',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
@@ -224,7 +226,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-persist',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 5,
@@ -244,14 +246,14 @@ describe('LoopService', () => {
     const newLoopService = createLoopService(newKvService, projectId, createMockLogger())
 
     const retrieved = newLoopService.getActiveState('session-persist')
-    expect(retrieved).toEqual(state)
+    expect(retrieved).toEqual({ ...state, loopName: state.loopName })
   })
 
   test('buildAuditPrompt returns audit instruction', () => {
     const state = {
       active: true,
       sessionId: 'session-audit',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
@@ -276,7 +278,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-audit',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 2,
@@ -303,7 +305,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-audit',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 2,
@@ -327,7 +329,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-audit',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 2,
@@ -351,7 +353,7 @@ describe('LoopService', () => {
     const activeState1 = {
       active: true,
       sessionId: 'active-1',
-      worktreeName: 'worktree-1',
+      loopName: 'worktree-1',
       worktreeDir: '/path/to/worktree1',
       worktreeBranch: 'opencode/loop-worktree-1',
       iteration: 1,
@@ -368,7 +370,7 @@ describe('LoopService', () => {
     const activeState2 = {
       active: true,
       sessionId: 'active-2',
-      worktreeName: 'worktree-2',
+      loopName: 'worktree-2',
       worktreeDir: '/path/to/worktree2',
       worktreeBranch: 'opencode/loop-worktree-2',
       iteration: 2,
@@ -385,7 +387,7 @@ describe('LoopService', () => {
     const inactiveState = {
       active: false,
       sessionId: 'inactive-1',
-      worktreeName: 'worktree-3',
+      loopName: 'worktree-3',
       worktreeDir: '/path/to/worktree3',
       worktreeBranch: 'opencode/loop-worktree-3',
       iteration: 1,
@@ -410,11 +412,11 @@ describe('LoopService', () => {
     expect(active.map((s) => s.sessionId)).not.toContain('inactive-1')
   })
 
-  test('findByWorktreeName returns state by worktree name', () => {
+  test('findByLoopName returns state by worktree name', () => {
     const state1 = {
       active: true,
       sessionId: 'session-1',
-      worktreeName: 'unique-worktree-name',
+      loopName: 'unique-worktree-name',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-unique-worktree-name',
       iteration: 1,
@@ -430,10 +432,10 @@ describe('LoopService', () => {
 
     loopService.setState('session-1', state1)
 
-    const found = loopService.findByWorktreeName('unique-worktree-name')
-    expect(found).toEqual(state1)
+    const found = loopService.findByLoopName('unique-worktree-name')
+    expect(found).toEqual({ ...state1, loopName: state1.loopName })
 
-    const notFound = loopService.findByWorktreeName('non-existent')
+    const notFound = loopService.findByLoopName('non-existent')
     expect(notFound).toBeNull()
   })
 
@@ -441,7 +443,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-err',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
@@ -465,7 +467,7 @@ describe('LoopService', () => {
     const state = {
       active: true,
       sessionId: 'session-default',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
@@ -488,7 +490,7 @@ describe('LoopService', () => {
     const inPlaceState = {
       active: true,
       sessionId: 'session-inplace',
-      worktreeName: 'inplace-worktree',
+      loopName: 'inplace-worktree',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'main',
       iteration: 1,
@@ -508,11 +510,11 @@ describe('LoopService', () => {
     expect(retrieved?.worktreeDir).toBe('/path/to/project')
   })
 
-  test('findByWorktreeName works with inPlace state', () => {
+  test('findByLoopName works with inPlace state', () => {
     const inPlaceState = {
       active: true,
       sessionId: 'session-inplace-2',
-      worktreeName: 'unique-inplace-name',
+      loopName: 'unique-inplace-name',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'develop',
       iteration: 2,
@@ -527,8 +529,8 @@ describe('LoopService', () => {
       worktree: false,
     }
     loopService.setState('session-inplace-2', inPlaceState)
-    const found = loopService.findByWorktreeName('unique-inplace-name')
-    expect(found).toEqual(inPlaceState)
+    const found = loopService.findByLoopName('unique-inplace-name')
+    expect(found).toEqual({ ...inPlaceState, loopName: inPlaceState.loopName })
     expect(found?.worktree).toBe(false)
   })
 
@@ -536,7 +538,7 @@ describe('LoopService', () => {
     const inPlaceState = {
       active: true,
       sessionId: 'session-inplace-3',
-      worktreeName: 'inplace-prompt-test',
+      loopName: 'inplace-prompt-test',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'main',
       iteration: 3,
@@ -560,7 +562,7 @@ describe('LoopService', () => {
     const inPlaceState = {
       active: true,
       sessionId: 'session-inplace-4',
-      worktreeName: 'inplace-audit-test',
+      loopName: 'inplace-audit-test',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'main',
       iteration: 2,
@@ -734,7 +736,7 @@ describe('Stall Detection', () => {
     loopService.setState(worktreeName, {
       active: true,
       sessionId: parentId,
-      worktreeName: 'test',
+      loopName: 'test',
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
       iteration: 1,
@@ -806,7 +808,7 @@ describe('Stall Detection', () => {
     loopService.setState(worktreeName, {
       active: true,
       sessionId,
-      worktreeName: 'test',
+      loopName: 'test',
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
       iteration: 1,
@@ -877,7 +879,7 @@ describe('Stall Detection', () => {
     loopService.setState(worktreeName, {
       active: true,
       sessionId,
-      worktreeName: 'test',
+      loopName: 'test',
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
       iteration: 1,
@@ -928,7 +930,7 @@ describe('reconcileStale', () => {
     const state = {
       active: true,
       sessionId: 'session-stale',
-      worktreeName: 'stale-worktree',
+      loopName: 'stale-worktree',
       worktreeDir: '/tmp/stale',
       worktreeBranch: 'main',
       iteration: 3,
@@ -1056,7 +1058,7 @@ describe('buildContinuationPrompt with outstanding findings', () => {
     const state = {
       active: true,
       sessionId: 'session-findings',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 3,
@@ -1084,7 +1086,7 @@ describe('buildContinuationPrompt with outstanding findings', () => {
     const state = {
       active: true,
       sessionId: 'session-no-findings',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 2,
@@ -1106,7 +1108,7 @@ describe('buildContinuationPrompt with outstanding findings', () => {
     const state = {
       active: true,
       sessionId: 'session-both',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 3,
@@ -1133,7 +1135,7 @@ describe('buildContinuationPrompt with outstanding findings', () => {
     const state = {
       active: true,
       sessionId: 'session-branch-filter',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
       iteration: 2,
@@ -1206,7 +1208,7 @@ describe('session rotation', () => {
     const state = {
       active: true,
       sessionId: oldSessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1221,7 +1223,7 @@ describe('session rotation', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(oldSessionId, 'test-worktree')
+    loopService.registerLoopSession(oldSessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1290,7 +1292,7 @@ describe('session rotation', () => {
     const state = {
       active: true,
       sessionId: oldSessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1305,7 +1307,7 @@ describe('session rotation', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(oldSessionId, 'test-worktree')
+    loopService.registerLoopSession(oldSessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1356,7 +1358,7 @@ describe('session rotation', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1371,7 +1373,7 @@ describe('session rotation', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(sessionId, 'test-worktree')
+    loopService.registerLoopSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1448,7 +1450,7 @@ describe('Assistant Error Detection', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1463,7 +1465,7 @@ describe('Assistant Error Detection', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(sessionId, 'test-worktree')
+    loopService.registerLoopSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1522,7 +1524,7 @@ describe('Assistant Error Detection', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1537,7 +1539,7 @@ describe('Assistant Error Detection', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(sessionId, 'test-worktree')
+    loopService.registerLoopSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1586,7 +1588,7 @@ describe('Assistant Error Detection', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1601,7 +1603,7 @@ describe('Assistant Error Detection', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(sessionId, 'test-worktree')
+    loopService.registerLoopSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1655,7 +1657,7 @@ describe('Assistant Error Detection', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1670,7 +1672,7 @@ describe('Assistant Error Detection', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(sessionId, 'test-worktree')
+    loopService.registerLoopSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1732,7 +1734,7 @@ describe('Assistant Error Detection', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1794,7 +1796,7 @@ describe('Assistant Error Detection', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'model-reset-test',
+      loopName: 'model-reset-test',
       worktreeDir: '/tmp/model-reset',
       worktreeBranch: 'main',
       iteration: 2,
@@ -1810,7 +1812,7 @@ describe('Assistant Error Detection', () => {
     }
 
     loopService.setState('model-reset-test', state)
-    loopService.registerSession(sessionId, 'model-reset-test')
+    loopService.registerLoopSession(sessionId, 'model-reset-test')
 
     await handler.onEvent({
       event: {
@@ -1868,7 +1870,7 @@ describe('Assistant Error Detection', () => {
     const state = {
       active: true,
       sessionId,
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -1883,7 +1885,7 @@ describe('Assistant Error Detection', () => {
     }
 
     loopService.setState('test-worktree', state)
-    loopService.registerSession(sessionId, 'test-worktree')
+    loopService.registerLoopSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1941,7 +1943,7 @@ describe('Force-restart behavior', () => {
     const inactiveState = {
       active: false,
       sessionId: 'old-session',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 3,
@@ -1958,8 +1960,8 @@ describe('Force-restart behavior', () => {
     }
 
     loopService.setState('test-worktree', inactiveState)
-    const retrieved = loopService.findByWorktreeName('test-worktree')
-    expect(retrieved).toEqual(inactiveState)
+    const retrieved = loopService.findByLoopName('test-worktree')
+    expect(retrieved).toEqual({ ...inactiveState, loopName: inactiveState.loopName })
     expect(retrieved?.active).toBe(false)
     expect(retrieved?.terminationReason).toBe('cancelled')
   })
@@ -1968,7 +1970,7 @@ describe('Force-restart behavior', () => {
     const completedState = {
       active: false,
       sessionId: 'completed-session',
-      worktreeName: 'completed-worktree',
+      loopName: 'completed-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 5,
@@ -1985,8 +1987,8 @@ describe('Force-restart behavior', () => {
     }
 
     loopService.setState('completed-worktree', completedState)
-    const retrieved = loopService.findByWorktreeName('completed-worktree')
-    expect(retrieved).toEqual(completedState)
+    const retrieved = loopService.findByLoopName('completed-worktree')
+    expect(retrieved).toEqual({ ...completedState, loopName: completedState.loopName })
     expect(retrieved?.active).toBe(false)
     expect(retrieved?.terminationReason).toBe('completed')
   })
@@ -1995,7 +1997,7 @@ describe('Force-restart behavior', () => {
     const activeState = {
       active: true,
       sessionId: 'active-session',
-      worktreeName: 'active-worktree',
+      loopName: 'active-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 2,
@@ -2010,13 +2012,13 @@ describe('Force-restart behavior', () => {
     }
 
     loopService.setState('active-worktree', activeState)
-    loopService.registerSession('active-session', 'active-worktree')
+    loopService.registerLoopSession('active-session', 'active-worktree')
 
     const retrieved = loopService.getActiveState('active-worktree')
-    expect(retrieved).toEqual(activeState)
+    expect(retrieved).toEqual({ ...activeState, loopName: activeState.loopName })
     expect(retrieved?.active).toBe(true)
 
-    const resolved = loopService.resolveWorktreeName('active-session')
+    const resolved = loopService.resolveLoopName('active-session')
     expect(resolved).toBe('active-worktree')
   })
 
@@ -2024,7 +2026,7 @@ describe('Force-restart behavior', () => {
     const activeState = {
       active: true,
       sessionId: 'session-to-unregister',
-      worktreeName: 'unregister-worktree',
+      loopName: 'unregister-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -2039,14 +2041,14 @@ describe('Force-restart behavior', () => {
     }
 
     loopService.setState('unregister-worktree', activeState)
-    loopService.registerSession('session-to-unregister', 'unregister-worktree')
+    loopService.registerLoopSession('session-to-unregister', 'unregister-worktree')
 
-    let resolved = loopService.resolveWorktreeName('session-to-unregister')
+    let resolved = loopService.resolveLoopName('session-to-unregister')
     expect(resolved).toBe('unregister-worktree')
 
-    loopService.unregisterSession('session-to-unregister')
+    loopService.unregisterLoopSession('session-to-unregister')
 
-    resolved = loopService.resolveWorktreeName('session-to-unregister')
+    resolved = loopService.resolveLoopName('session-to-unregister')
     expect(resolved).toBeNull()
   })
 
@@ -2054,7 +2056,7 @@ describe('Force-restart behavior', () => {
     const state = {
       active: true,
       sessionId: 'session-to-delete',
-      worktreeName: 'delete-worktree',
+      loopName: 'delete-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
       iteration: 1,
@@ -2071,7 +2073,7 @@ describe('Force-restart behavior', () => {
     loopService.setState('delete-worktree', state)
 
     let retrieved = loopService.getActiveState('delete-worktree')
-    expect(retrieved).toEqual(state)
+    expect(retrieved).toEqual({ ...state, loopName: state.loopName })
 
     loopService.deleteState('delete-worktree')
 
@@ -2200,7 +2202,7 @@ describe('terminateAll', () => {
     return {
       active: true,
       sessionId,
-      worktreeName: name,
+      loopName: name,
       worktreeDir: `/tmp/${name}`,
       worktreeBranch: 'main',
       iteration: 1,
@@ -2278,7 +2280,7 @@ describe('listRecent', () => {
     return {
       active: true,
       sessionId,
-      worktreeName: name,
+      loopName: name,
       worktreeDir: `/tmp/${name}`,
       worktreeBranch: 'main',
       iteration: 1,
@@ -2297,7 +2299,7 @@ describe('listRecent', () => {
     return {
       active: false,
       sessionId,
-      worktreeName: name,
+      loopName: name,
       worktreeDir: `/tmp/${name}`,
       worktreeBranch: 'main',
       iteration: 1,
@@ -2320,7 +2322,7 @@ describe('listRecent', () => {
     const recent = loopService.listRecent()
 
     expect(recent.length).toBe(1)
-    expect(recent[0].worktreeName).toBe('inactive-1')
+    expect(recent[0].loopName).toBe('inactive-1')
   })
 
   test('returns empty array when no inactive states', () => {
@@ -2353,7 +2355,7 @@ describe('findCandidatesByPartialName', () => {
     return {
       active: true,
       sessionId,
-      worktreeName: name,
+      loopName: name,
       worktreeDir: `/tmp/${name}`,
       worktreeBranch: 'main',
       iteration: 1,
@@ -2383,6 +2385,114 @@ describe('findCandidatesByPartialName', () => {
     const candidates = loopService.findCandidatesByPartialName('nonexistent')
 
     expect(candidates).toEqual([])
+  })
+})
+
+describe('loop tool plan persistence', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  function createMockContext() {
+    const sessionCreate = mock(async () => ({ data: { id: 'loop-session-1' }, error: null }))
+    const promptAsync = mock(async () => ({ data: {}, error: null }))
+
+    return {
+      sessionCreate,
+      promptAsync,
+      ctx: {
+        projectId,
+        directory: TEST_DIR,
+        config: {
+          executionModel: 'test-provider/test-model',
+          loop: { defaultAudit: true, defaultMaxIterations: 0 },
+        },
+        logger: createMockLogger(),
+        db,
+        dataDir: TEST_DIR,
+        kvService,
+        loopService,
+        loopHandler: {
+          startWatchdog: () => {},
+        },
+        v2: {
+          session: {
+            create: sessionCreate,
+            promptAsync,
+          },
+          worktree: {
+            create: mock(async () => ({ data: null, error: null })),
+            remove: mock(async () => ({ data: {}, error: null })),
+          },
+          tui: {
+            selectSession: mock(async () => ({ data: {}, error: null })),
+          },
+        },
+        cleanup: async () => {},
+        input: {} as any,
+        sandboxManager: null,
+        graphService: null,
+      } as any,
+    }
+  }
+
+  test('stores cached session plan under loop worktree key and makes it readable from the loop session', async () => {
+    const { ctx, promptAsync } = createMockContext()
+    const loopTools = createLoopTools(ctx)
+    const planTools = createPlanTools(ctx)
+
+    kvService.set(projectId, 'plan:architect-session', '# Test Plan\n\n- implement fix')
+
+    const result = await loopTools.loop.execute(
+      { title: 'My Loop Plan', worktree: false },
+      { sessionID: 'architect-session', directory: TEST_DIR } as any,
+    )
+
+    expect(result).toContain('Memory loop activated! (in-place mode)')
+    expect(kvService.get<string>(projectId, 'plan:architect-session')).toBeNull()
+    expect(kvService.get<string>(projectId, 'plan:my-loop-plan')).toBe('# Test Plan\n\n- implement fix')
+    expect(loopService.resolveLoopName('loop-session-1')).toBe('my-loop-plan')
+    expect(promptAsync).toHaveBeenCalled()
+
+    const storedPlan = await planTools['plan-read'].execute(
+      {},
+      { sessionID: 'loop-session-1', directory: TEST_DIR } as any,
+    )
+
+    expect(storedPlan).toContain('# Test Plan')
+    expect(storedPlan).toContain('- implement fix')
+  })
+
+  test('stores explicit loop plan under the loop worktree key for audit-time plan-read', async () => {
+    const { ctx } = createMockContext()
+    const loopTools = createLoopTools(ctx)
+    const planTools = createPlanTools(ctx)
+
+    await loopTools.loop.execute(
+      { title: 'Explicit Loop Plan', plan: '# Explicit Plan\n\n- verify audits', worktree: false },
+      { sessionID: 'architect-session', directory: TEST_DIR } as any,
+    )
+
+    expect(kvService.get<string>(projectId, 'plan:explicit-loop-plan')).toBe('# Explicit Plan\n\n- verify audits')
+
+    const storedPlan = await planTools['plan-read'].execute(
+      {},
+      { sessionID: 'loop-session-1', directory: TEST_DIR } as any,
+    )
+
+    expect(storedPlan).toContain('# Explicit Plan')
+    expect(storedPlan).toContain('- verify audits')
   })
 })
 
@@ -2571,7 +2681,7 @@ describe('generateUniqueName', () => {
     const activeState = {
       active: true,
       sessionId: 'active-1',
-      worktreeName: 'test-worktree',
+      loopName: 'test-worktree',
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
       iteration: 1,
@@ -2589,7 +2699,7 @@ describe('generateUniqueName', () => {
       ...activeState,
       active: false,
       sessionId: 'recent-1',
-      worktreeName: 'test-worktree-1',
+      loopName: 'test-worktree-1',
       completedAt: new Date().toISOString(),
       terminationReason: 'completed',
     }
@@ -2599,7 +2709,7 @@ describe('generateUniqueName', () => {
     
     const active = loopService.listActive()
     const recent = loopService.listRecent()
-    const allNames = [...active, ...recent].map((s) => s.worktreeName)
+    const allNames = [...active, ...recent].map((s) => s.loopName)
     
     // Both 'test-worktree' and 'test-worktree-1' exist, so next should be 'test-worktree-2'
     const result = generateUniqueName('test-worktree', allNames)

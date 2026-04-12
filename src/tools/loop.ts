@@ -17,25 +17,26 @@ const z = tool.schema
 interface LoopSetupOptions {
   prompt: string
   sessionTitle: string
-  worktreeName: string
+  loopName: string
+  sourcePlanSessionID?: string
   completionSignal: string | null
   maxIterations: number
   audit: boolean
   agent?: string
   model?: { providerID: string; modelID: string }
   worktree?: boolean
-  onLoopStarted?: (worktreeName: string) => void
+  onLoopStarted?: (loopName: string) => void
 }
 
 export async function setupLoop(
   ctx: ToolContext,
   options: LoopSetupOptions,
 ): Promise<string> {
-  const { v2, directory, config, loopService, logger, sandboxManager } = ctx
+  const { v2, directory, config, loopService, logger, sandboxManager, kvService, projectId } = ctx
   const projectDir = directory
   const maxIter = options.maxIterations ?? config.loop?.defaultMaxIterations ?? 0
   
-  const uniqueWorktreeName = loopService.generateUniqueWorktreeName(options.worktreeName)
+  const uniqueLoopName = loopService.generateUniqueLoopName(options.loopName)
 
   interface LoopContext {
     sessionId: string
@@ -73,7 +74,7 @@ export async function setupLoop(
     }
   } else {
     const worktreeResult = await v2.worktree.create({
-      worktreeCreateInput: { name: uniqueWorktreeName },
+      worktreeCreateInput: { name: uniqueLoopName },
     })
 
     if (worktreeResult.error || !worktreeResult.data) {
@@ -113,9 +114,9 @@ export async function setupLoop(
 
   if (sandboxEnabled) {
     try {
-      const result = await sandboxManager!.start(uniqueWorktreeName, loopContext.directory)
+      const result = await sandboxManager!.start(uniqueLoopName, loopContext.directory)
       sandboxContainerName = result.containerName
-      logger.log(`Sandbox container ${sandboxContainerName} started for loop ${uniqueWorktreeName}`)
+      logger.log(`Sandbox container ${sandboxContainerName} started for loop ${uniqueLoopName}`)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       logger.error(`loop: failed to start sandbox container`, err)
@@ -126,7 +127,7 @@ export async function setupLoop(
   const state: LoopState = {
     active: true,
     sessionId: loopContext.sessionId,
-    worktreeName: uniqueWorktreeName,
+    loopName: uniqueLoopName,
     worktreeDir: loopContext.directory,
     worktreeBranch: loopContext.branch,
     iteration: 1,
@@ -143,9 +144,14 @@ export async function setupLoop(
     sandboxContainerName,
   }
 
-  loopService.setState(uniqueWorktreeName, state)
-  loopService.registerSession(loopContext.sessionId, uniqueWorktreeName)
-  logger.log(`loop: state stored for worktree=${uniqueWorktreeName}`)
+  kvService.set(projectId, `plan:${uniqueLoopName}`, options.prompt)
+  if (options.sourcePlanSessionID) {
+    kvService.delete(projectId, `plan:${options.sourcePlanSessionID}`)
+  }
+
+  loopService.setState(uniqueLoopName, state)
+  loopService.registerLoopSession(loopContext.sessionId, uniqueLoopName)
+  logger.log(`loop: state stored for loop=${uniqueLoopName}`)
 
   let promptText = options.prompt
   if (options.completionSignal) {
@@ -172,10 +178,10 @@ export async function setupLoop(
 
   if (promptResult.error) {
     logger.error(`loop: failed to send prompt`, promptResult.error)
-    loopService.deleteState(uniqueWorktreeName)
+    loopService.deleteState(uniqueLoopName)
     if (sandboxEnabled) {
       try {
-        await sandboxManager!.stop(uniqueWorktreeName)
+        await sandboxManager!.stop(uniqueLoopName)
       } catch (sbxErr) {
         logger.error(`loop: failed to stop sandbox container on prompt failure`, sbxErr)
       }
@@ -192,7 +198,7 @@ export async function setupLoop(
       : 'Loop session created but failed to send prompt. Cleaned up.'
   }
 
-  options.onLoopStarted?.(uniqueWorktreeName)
+  options.onLoopStarted?.(uniqueLoopName)
 
   if (!options.worktree) {
     v2.tui.selectSession({ sessionID: loopContext.sessionId }).catch((err) => {
@@ -217,7 +223,7 @@ export async function setupLoop(
       lines.push(`Branch: ${loopContext.branch} (in-place)`)
     }
   } else {
-    lines.push(`Worktree name: ${uniqueWorktreeName}`)
+    lines.push(`Loop name: ${uniqueLoopName}`)
     lines.push(`Worktree: ${loopContext.directory}`)
     lines.push(`Branch: ${loopContext.branch}`)
   }
@@ -246,7 +252,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
         plan: z.string().optional().describe('The full implementation plan. If omitted, reads from the session plan store.'),
         title: z.string().describe('Short title for the session (shown in session list)'),
         worktree: z.boolean().optional().default(false).describe('Run in isolated git worktree instead of current directory'),
-        worktreeName: z.string().optional().describe('Name for the worktree (max 25 chars, auto-incremented if collision exists)'),
+        loopName: z.string().optional().describe('Name for the loop (max 25 chars, auto-incremented if collision exists)'),
       },
       execute: async (args, context) => {
         if (config.loop?.enabled === false) {
@@ -256,6 +262,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
         logger.log(`loop: creating worktree for plan="${args.title}"`)
 
         let planText = args.plan
+        let sourcePlanSessionID: string | undefined
         if (!planText) {
           const planKey = `plan:${context.sessionID}`
           const cached = ctx.kvService.get<string>(ctx.projectId, planKey)
@@ -263,19 +270,20 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
             return 'No plan found. Write the plan via plan-write before calling this tool, or pass it directly as the plan argument.'
           }
           planText = typeof cached === 'string' ? cached : JSON.stringify(cached, null, 2)
-          ctx.kvService.delete(ctx.projectId, planKey)
+          sourcePlanSessionID = context.sessionID
         }
 
         const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
         const loopModel = parseModelString(config.loop?.model) ?? parseModelString(config.executionModel)
         const audit = config.loop?.defaultAudit ?? true
         
-        const worktreeName = args.worktreeName ? slugify(args.worktreeName) : slugify(sessionTitle)
+        const loopName = args.loopName ? slugify(args.loopName) : slugify(sessionTitle)
 
         return setupLoop(ctx, {
           prompt: planText,
           sessionTitle: `Loop: ${sessionTitle}`,
-          worktreeName,
+          loopName,
+          sourcePlanSessionID,
           completionSignal: DEFAULT_COMPLETION_SIGNAL,
           maxIterations: config.loop?.defaultMaxIterations ?? 0,
           audit: audit,
@@ -297,22 +305,22 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 
         if (args.name) {
           const name = args.name
-          const matchedState = loopService.findByWorktreeName(name)
+          const matchedState = loopService.findByLoopName(name)
           if (!matchedState) {
             const candidates = loopService.findCandidatesByPartialName(name)
             if (candidates.length > 0) {
-              return `Multiple loops match "${name}":\n${candidates.map((s) => `- ${s.worktreeName}`).join('\n')}\n\nBe more specific.`
+              return `Multiple loops match "${name}":\n${candidates.map((s) => `- ${s.loopName}`).join('\n')}\n\nBe more specific.`
             }
             const recent = loopService.listRecent()
-            const foundRecent = recent.find((s) => s.worktreeName === name || (s.worktreeBranch && s.worktreeBranch.toLowerCase().includes(name.toLowerCase())))
+            const foundRecent = recent.find((s) => s.loopName === name || (s.worktreeBranch && s.worktreeBranch.toLowerCase().includes(name.toLowerCase())))
             if (foundRecent) {
-               return `Loop "${foundRecent.worktreeName}" has already completed.`
+               return `Loop "${foundRecent.loopName}" has already completed.`
             }
-             return `No active loop found for worktree "${name}".`
+             return `No active loop found for loop "${name}".`
           }
           state = matchedState
           if (!state.active) {
-             return `Loop "${state.worktreeName}" has already completed.`
+             return `Loop "${state.loopName}" has already completed.`
           }
         } else {
           const active = loopService.listActive()
@@ -320,7 +328,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
           if (active.length === 1) {
             state = active[0]
           } else {
-             return `Multiple active loops. Specify a name:\n${active.map((s) => `- ${s.worktreeName} (iteration ${s.iteration})`).join('\n')}`
+             return `Multiple active loops. Specify a name:\n${active.map((s) => `- ${s.loopName} (iteration ${s.iteration})`).join('\n')}`
           }
         }
 
@@ -343,7 +351,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 
         const modeInfo = !state.worktree ? ' (in-place)' : ''
         const branchInfo = state.worktreeBranch ? `\nBranch: ${state.worktreeBranch}` : ''
-        return `Cancelled loop "${state.worktreeName}"${modeInfo} (was at iteration ${state.iteration}).\nDirectory: ${state.worktreeDir}${branchInfo}`
+        return `Cancelled loop "${state.loopName}"${modeInfo} (was at iteration ${state.iteration}).\nDirectory: ${state.worktreeDir}${branchInfo}`
       },
     }),
 
@@ -364,35 +372,35 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 
           const recent = loopService.listRecent()
           const allStates = [...active, ...recent]
-          const { match: stoppedState, candidates } = findPartialMatch(args.name, allStates, (s) => [s.worktreeName, s.worktreeBranch])
+          const { match: stoppedState, candidates } = findPartialMatch(args.name, allStates, (s) => [s.loopName, s.worktreeBranch])
           if (!stoppedState && candidates.length > 0) {
-            return `Multiple loops match "${args.name}":\n${candidates.map((s) => `- ${s.worktreeName}`).join('\n')}\n\nBe more specific.`
+            return `Multiple loops match "${args.name}":\n${candidates.map((s) => `- ${s.loopName}`).join('\n')}\n\nBe more specific.`
           }
           if (!stoppedState) {
-            const available = [...active, ...recent].map((s) => `- ${s.worktreeName}`).join('\n')
+            const available = [...active, ...recent].map((s) => `- ${s.loopName}`).join('\n')
              return `No loop found for "${args.name}".\n\nAvailable loops:\n${available}`
           }
 
           if (stoppedState.active) {
             if (!args.force) {
-              return `Loop "${stoppedState.worktreeName}" is currently active. Use restart with force: true to force-restart a stuck loop.`
+              return `Loop "${stoppedState.loopName}" is currently active. Use restart with force: true to force-restart a stuck loop.`
             }
             try { await v2.session.abort({ sessionID: stoppedState.sessionId }) } catch {}
-            loopService.unregisterSession(stoppedState.sessionId)
+            loopService.unregisterLoopSession(stoppedState.sessionId)
           }
 
           if (stoppedState.terminationReason === 'completed') {
-            return `Loop "${stoppedState.worktreeName}" completed successfully and cannot be restarted.`
+            return `Loop "${stoppedState.loopName}" completed successfully and cannot be restarted.`
           }
 
           if (!stoppedState.worktree && stoppedState.worktreeDir) {
             if (!existsSync(stoppedState.worktreeDir)) {
-              return `Cannot restart "${stoppedState.worktreeName}": worktree directory no longer exists at ${stoppedState.worktreeDir}. The worktree may have been cleaned up.`
+              return `Cannot restart "${stoppedState.loopName}": worktree directory no longer exists at ${stoppedState.worktreeDir}. The worktree may have been cleaned up.`
             }
           }
 
           const createParams = {
-            title: stoppedState.worktreeName!,
+            title: stoppedState.loopName,
             directory: stoppedState.worktreeDir!,
             permission: LOOP_PERMISSION_RULESET,
           }
@@ -406,12 +414,12 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 
           const newSessionId = createResult.data.id
 
-          loopService.deleteState(stoppedState.worktreeName!)
+          loopService.deleteState(stoppedState.loopName!)
 
           const restartSandbox = isSandboxEnabled(config, ctx.sandboxManager)
           if (restartSandbox) {
             try {
-              const sbxResult = await ctx.sandboxManager!.start(stoppedState.worktreeName!, stoppedState.worktreeDir!)
+              const sbxResult = await ctx.sandboxManager!.start(stoppedState.loopName!, stoppedState.worktreeDir!)
                logger.log(`loop-restart: started sandbox container ${sbxResult.containerName}`)
             } catch (err) {
                logger.error(`loop-restart: failed to start sandbox container`, err)
@@ -422,7 +430,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
           const newState: LoopState = {
             active: true,
             sessionId: newSessionId,
-            worktreeName: stoppedState.worktreeName!,
+            loopName: stoppedState.loopName,
             worktreeDir: stoppedState.worktreeDir!,
             worktreeBranch: stoppedState.worktreeBranch,
             iteration: stoppedState.iteration!,
@@ -437,12 +445,12 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
             worktree: stoppedState.worktree,
             sandbox: restartSandbox,
             sandboxContainerName: restartSandbox
-              ? ctx.sandboxManager?.docker.containerName(stoppedState.worktreeName!)
-              : undefined,
+                ? ctx.sandboxManager?.docker.containerName(stoppedState.loopName!)
+                : undefined,
           }
 
-          loopService.setState(stoppedState.worktreeName!, newState)
-          loopService.registerSession(newSessionId, stoppedState.worktreeName!)
+          loopService.setState(stoppedState.loopName!, newState)
+          loopService.registerLoopSession(newSessionId, stoppedState.loopName!)
 
           let promptText = stoppedState.prompt ?? ''
           if (stoppedState.completionSignal) {
@@ -471,10 +479,10 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 
           if (promptResult.error) {
              logger.error(`loop-restart: failed to send prompt`, promptResult.error)
-            loopService.deleteState(stoppedState.worktreeName!)
+            loopService.deleteState(stoppedState.loopName!)
             if (restartSandbox) {
               try {
-                await ctx.sandboxManager!.stop(stoppedState.worktreeName!)
+                await ctx.sandboxManager!.stop(stoppedState.loopName!)
               } catch (sbxErr) {
                  logger.error(`loop-restart: failed to stop sandbox on prompt failure`, sbxErr)
               }
@@ -482,12 +490,12 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
             return `Restart failed: could not send prompt to new session.`
           }
 
-          loopHandler.startWatchdog(stoppedState.worktreeName!)
+          loopHandler.startWatchdog(stoppedState.loopName!)
 
           const modeInfo = !stoppedState.worktree ? ' (in-place)' : ''
           const branchInfo = stoppedState.worktreeBranch ? `\nBranch: ${stoppedState.worktreeBranch}` : ''
           return [
-            `Restarted loop "${stoppedState.worktreeName}"${modeInfo}`,
+            `Restarted loop "${stoppedState.loopName}"${modeInfo}`,
             '',
             `New session: ${newSessionId}`,
             `Continuing from iteration: ${stoppedState.iteration}`,
@@ -506,7 +514,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
             const lines: string[] = ['Recently Completed Loops', '']
             recent.forEach((s, i) => {
               const durationStr = formatDuration(computeElapsedSeconds(s.startedAt, s.completedAt))
-              lines.push(`${i + 1}. ${s.worktreeName}`)
+              lines.push(`${i + 1}. ${s.loopName}`)
               lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration} | Duration: ${durationStr} | Completed: ${s.completedAt ?? 'unknown'}`)
               lines.push('')
             })
@@ -534,10 +542,10 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
             const iterInfo = s.maxIterations && s.maxIterations > 0 ? `${s.iteration} / ${s.maxIterations}` : `${s.iteration} (unlimited)`
             const sessionStatus = statuses[s.sessionId]?.type ?? 'unavailable'
             const modeIndicator = !s.worktree ? ' (in-place)' : ''
-            const stallInfo = loopHandler.getStallInfo(s.worktreeName)
+            const stallInfo = loopHandler.getStallInfo(s.loopName!)
             const stallCount = stallInfo?.consecutiveStalls ?? 0
             const stallSuffix = stallCount > 0 ? ` | Stalls: ${stallCount}` : ''
-            lines.push(`${i + 1}. ${s.worktreeName}${modeIndicator}`)
+            lines.push(`${i + 1}. ${s.loopName}${modeIndicator}`)
             lines.push(`   Phase: ${s.phase} | Iteration: ${iterInfo} | Duration: ${duration} | Status: ${sessionStatus}${stallSuffix}`)
             lines.push('')
           })
@@ -548,7 +556,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
             const limitedRecent = recent.slice(0, 10)
             limitedRecent.forEach((s, i) => {
               const durationStr = formatDuration(computeElapsedSeconds(s.startedAt, s.completedAt))
-              lines.push(`${i + 1}. ${s.worktreeName}`)
+              lines.push(`${i + 1}. ${s.loopName}`)
               lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration} | Duration: ${durationStr} | Completed: ${s.completedAt ?? 'unknown'}`)
               lines.push('')
             })
@@ -562,13 +570,13 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
           return lines.join('\n')
         }
 
-        const state = loopService.findByWorktreeName(args.name)
+        const state = loopService.findByLoopName(args.name)
         if (!state) {
           const candidates = loopService.findCandidatesByPartialName(args.name)
           if (candidates.length > 0) {
-            return `Multiple loops match "${args.name}":\n${candidates.map((s) => `- ${s.worktreeName}`).join('\n')}\n\nBe more specific.`
+            return `Multiple loops match "${args.name}":\n${candidates.map((s) => `- ${s.loopName}`).join('\n')}\n\nBe more specific.`
           }
-          return `No loop found for worktree "${args.name}".`
+          return `No loop found for loop "${args.name}".`
         }
 
         if (!state.active) {
@@ -578,7 +586,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
           const statusLines: string[] = [
             'Loop Status (Inactive)',
             '',
-            `Name: ${state.worktreeName}`,
+            `Name: ${state.loopName}`,
             `Session: ${state.sessionId}`,
           ]
           if (!state.worktree) {
@@ -632,7 +640,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 
         const duration = formatDuration(computeElapsedSeconds(state.startedAt))
 
-        const stallInfo = loopHandler.getStallInfo(state.worktreeName)
+        const stallInfo = loopHandler.getStallInfo(state.loopName!)
         const secondsSinceActivity = stallInfo
           ? Math.round((Date.now() - stallInfo.lastActivityTime) / 1000)
           : null
@@ -641,7 +649,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
         const statusLines: string[] = [
           'Loop Status',
           '',
-          `Name: ${state.worktreeName}`,
+          `Name: ${state.loopName}`,
           `Session: ${state.sessionId}`,
         ]
         if (!state.worktree) {

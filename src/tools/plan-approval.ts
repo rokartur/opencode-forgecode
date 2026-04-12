@@ -29,8 +29,8 @@ export function createToolExecuteBeforeHook(ctx: ToolContext): Hooks['tool.execu
     input: { tool: string; sessionID: string; callID: string },
     _output: { args: unknown }
   ) => {
-    const worktreeName = loopService.resolveWorktreeName(input.sessionID)
-    const state = worktreeName ? loopService.getActiveState(worktreeName) : null
+    const loopName = loopService.resolveLoopName(input.sessionID)
+    const state = loopName ? loopService.getActiveState(loopName) : null
     if (!state?.active) return
 
     if (!(input.tool in LOOP_BLOCKED_TOOLS)) return
@@ -157,15 +157,15 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
             const isWorktree = matchedLabel === 'Loop (worktree)'
             // Use explicit loop name from plan (or fallback to title)
             const { executionName } = extractLoopNames(planText)
-            const uniqueWorktreeName = ctx.loopService.generateUniqueWorktreeName(executionName)
+            const uniqueLoopName = ctx.loopService.generateUniqueLoopName(executionName)
             
             output.output = isWorktree 
               ? 'Starting loop in worktree...' 
               : 'Starting loop in-place...'
-            logger.log(`Plan approval: "${matchedLabel}" — starting loop with worktree name "${uniqueWorktreeName}"`)
+            logger.log(`Plan approval: "${matchedLabel}" — starting loop with loop name "${uniqueLoopName}"`)
             
             // Store plan under the unique worktree name (same name that setupLoop will use)
-            kvService.set(projectId, `plan:${uniqueWorktreeName}`, planText)
+            kvService.set(projectId, `plan:${uniqueLoopName}`, planText)
             kvService.delete(projectId, `plan:${input.sessionID}`)
             
             const loopModel = parseModelString(config.loop?.model) ?? parseModelString(config.executionModel)
@@ -173,7 +173,7 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
             setupLoop(ctx, {
               prompt: planText,
               sessionTitle: `Loop: ${title}`,
-              worktreeName: uniqueWorktreeName,
+              loopName: uniqueLoopName,
               completionSignal: DEFAULT_COMPLETION_SIGNAL,
               maxIterations: config.loop?.defaultMaxIterations ?? 0,
               audit: config.loop?.defaultAudit ?? true,
@@ -199,8 +199,8 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
       return
     }
 
-    const worktreeName = loopService.resolveWorktreeName(input.sessionID)
-    const state = worktreeName ? loopService.getActiveState(worktreeName) : null
+    const loopName = loopService.resolveLoopName(input.sessionID)
+    const state = loopName ? loopService.getActiveState(loopName) : null
     if (!state?.active) return
 
     if (!(input.tool in LOOP_BLOCKED_TOOLS)) return

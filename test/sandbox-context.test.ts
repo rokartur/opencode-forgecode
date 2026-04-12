@@ -5,8 +5,8 @@ import type { PluginConfig } from '../src/types'
 describe('getSandboxForSession', () => {
   const mockDocker = {} as any
   const mockLoopService = {
-    resolveWorktreeName: (sessionId: string) => sessionId === 'valid-session' ? 'test-worktree' : null,
-    getActiveState: (name: string) => name === 'test-worktree' ? { active: true, sandbox: true, worktreeDir: '/test' } : null,
+    resolveLoopName: (sessionId: string) => sessionId === 'valid-session' ? 'test-loop' : null,
+    getActiveState: (name: string) => name === 'test-loop' ? { active: true, sandbox: true, worktreeDir: '/test' } : null,
   } as any
 
   it('returns null when sandboxManager is null', () => {
@@ -20,7 +20,7 @@ describe('getSandboxForSession', () => {
   it('returns null when worktreeName not found', () => {
     const mockSandboxManager = { docker: mockDocker, getActive: () => null } as any
     const result = getSandboxForSession(
-      { sandboxManager: mockSandboxManager, loopService: { ...mockLoopService, resolveWorktreeName: () => null } },
+      { sandboxManager: mockSandboxManager, loopService: { ...mockLoopService, resolveLoopName: () => null } },
       'invalid-session'
     )
     expect(result).toBeNull()
@@ -47,7 +47,7 @@ describe('getSandboxForSession', () => {
   it('returns context when all conditions met', () => {
     const mockSandboxManager = {
       docker: mockDocker,
-      getActive: (name: string) => name === 'test-worktree' ? { containerName: 'test-container', projectDir: '/test/project' } : null,
+      getActive: (name: string) => name === 'test-loop' ? { containerName: 'test-container', projectDir: '/test/project' } : null,
     } as any
     const result = getSandboxForSession(
       { sandboxManager: mockSandboxManager, loopService: mockLoopService },

@@ -174,7 +174,7 @@ describe('Fresh Loop Launch', () => {
       expect(state.worktree).toBe(false)
       expect(state.phase).toBe('coding')
       expect(state.prompt).toBe(planText)
-      expect(state.worktreeName).toBe('test-plan') // Falls back to title
+      expect(state.loopName).toBe('test-plan') // Falls back to title
     }
   })
 
@@ -193,7 +193,7 @@ describe('Fresh Loop Launch', () => {
 
     expect(result).toBeDefined()
     expect(result?.isWorktree).toBe(true)
-    expect(result?.worktreeName).toBe('test-plan')
+    expect(result?.executionName).toBe('test-plan')
     
     const loopStateRow = db.prepare(
       'SELECT data FROM project_kv WHERE project_id = ? AND key LIKE ?'
@@ -229,8 +229,8 @@ describe('Fresh Loop Launch', () => {
 
     expect(sessionRow).toBeDefined()
     if (sessionRow) {
-      const worktreeName = JSON.parse(sessionRow.data)
-      expect(worktreeName).toBe('test-plan')
+      const loopName = JSON.parse(sessionRow.data)
+      expect(loopName).toBe('test-plan')
     }
   })
 
@@ -320,7 +320,7 @@ describe('Fresh Loop Launch', () => {
 
     expect(result).toBeDefined()
     expect(result?.loopName).toBe('custom-name')
-    expect(result?.worktreeName).toBe('custom-name')
+    expect(result?.executionName).toBe('custom-name')
   })
 
   test('Returns structured LaunchResult with all fields', async () => {
@@ -339,7 +339,7 @@ describe('Fresh Loop Launch', () => {
     expect(result).toBeDefined()
     expect(result?.sessionId).toBeDefined()
     expect(result?.loopName).toBeDefined()
-    expect(result?.worktreeName).toBeDefined()
+    expect(result?.executionName).toBeDefined()
     expect(result?.isWorktree).toBe(true)
     expect(result?.worktreeDir).toBeDefined()
     expect(result?.worktreeBranch).toBeDefined()
@@ -361,7 +361,7 @@ describe('Fresh Loop Launch', () => {
     expect(result).toBeDefined()
     
     // Verify loop: key exists immediately after launch
-    const loopKey = `loop:${result!.worktreeName}`
+    const loopKey = `loop:${result!.executionName}`
     const loopRow = db.prepare(
       'SELECT data, expires_at, created_at, updated_at FROM project_kv WHERE project_id = ? AND key = ?'
     ).get(projectId, loopKey) as { data: string; expires_at: number; created_at: number; updated_at: number } | null
@@ -372,7 +372,7 @@ describe('Fresh Loop Launch', () => {
       // Verify schema-required fields
       expect(state.active).toBe(true)
       expect(state.sessionId).toBe(result?.sessionId)
-      expect(state.worktreeName).toBe(result?.worktreeName)
+      expect(state.loopName).toBe(result?.executionName)
       expect(state.worktreeDir).toBeDefined()
       expect(state.iteration).toBe(1)
       expect(state.phase).toBe('coding')
@@ -408,8 +408,8 @@ describe('Fresh Loop Launch', () => {
 
     expect(sessionRow).toBeDefined()
     if (sessionRow) {
-      const storedWorktreeName = JSON.parse(sessionRow.data)
-      expect(storedWorktreeName).toBe(result?.worktreeName)
+      const storedLoopName = JSON.parse(sessionRow.data)
+      expect(storedLoopName).toBe(result?.executionName)
     }
   })
 
@@ -431,7 +431,7 @@ describe('Fresh Loop Launch', () => {
     // Display name preserves original formatting
     expect(result?.loopName).toBe('API v2.0 Migration!')
     // Worktree name is sanitized
-    expect(result?.worktreeName).toBe('api-v2-0-migration')
+    expect(result?.executionName).toBe('api-v2-0-migration')
   })
 
   test('Uses code agent for prompt', async () => {
@@ -469,7 +469,7 @@ describe('Fresh Loop Launch', () => {
     // Display name should preserve original casing
     expect(result?.loopName).toBe('API Migration v2.0')
     // Worktree name should be sanitized
-    expect(result?.worktreeName).toBe('api-migration-v2-0')
+    expect(result?.executionName).toBe('api-migration-v2-0')
   })
 
   test('Display name uses markdown bold format correctly', async () => {
@@ -488,7 +488,7 @@ describe('Fresh Loop Launch', () => {
 
     expect(result).toBeDefined()
     expect(result?.loopName).toBe('User Auth System')
-    expect(result?.worktreeName).toBe('user-auth-system')
+    expect(result?.executionName).toBe('user-auth-system')
   })
 
   test('Display name handles bullet list format', async () => {
@@ -507,7 +507,7 @@ describe('Fresh Loop Launch', () => {
 
     expect(result).toBeDefined()
     expect(result?.loopName).toBe('Database Optimization')
-    expect(result?.worktreeName).toBe('database-optimization')
+    expect(result?.executionName).toBe('database-optimization')
   })
 
   test('Falls back to title when no explicit loop name', async () => {
@@ -526,6 +526,6 @@ describe('Fresh Loop Launch', () => {
 
     expect(result).toBeDefined()
     expect(result?.loopName).toBe('Fallback Title Here')
-    expect(result?.worktreeName).toBe('fallback-title-here')
+    expect(result?.executionName).toBe('fallback-title-here')
   })
 })

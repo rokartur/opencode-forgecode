@@ -23,10 +23,10 @@ function createTestKvDb(tempDir: string): Database {
   return db
 }
 
-function insertLoopState(db: Database, projectId: string, worktreeName: string, state: Partial<LoopState>): void {
+function insertLoopState(db: Database, projectId: string, loopName: string, state: Partial<LoopState>): void {
   const defaultState: LoopState = {
     sessionId: 'test-session-id',
-    worktreeName,
+    loopName,
     worktreeBranch: 'main',
     worktreeDir: '/tmp/test-worktree',
     worktree: true,
@@ -48,7 +48,7 @@ function insertLoopState(db: Database, projectId: string, worktreeName: string, 
 
   db.run(
     'INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [projectId, `loop:${worktreeName}`, data, expiresAt, now]
+    [projectId, `loop:${loopName}`, data, expiresAt, now]
   )
 }
 
@@ -97,7 +97,7 @@ describe('CLI Status - list-worktrees', () => {
 
     const expiredState: LoopState = {
       sessionId: 'test-session',
-      worktreeName: 'expired-worktree',
+      loopName: 'expired-worktree',
       worktreeBranch: 'main',
       worktreeDir: '/tmp/test',
       worktree: true,

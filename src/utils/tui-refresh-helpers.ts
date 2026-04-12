@@ -57,9 +57,9 @@ export function readLoopStates(projectId: string, dbPathOverride?: string): Loop
     for (const row of rows) {
       try {
         const state = JSON.parse(row.data)
-        if (!state.worktreeName || !state.sessionId) continue
+        if (!state.loopName || !state.sessionId) continue
         loops.push({
-          name: state.worktreeName,
+          name: state.loopName,
           phase: state.phase ?? 'coding',
           iteration: state.iteration ?? 0,
           maxIterations: state.maxIterations ?? 0,
@@ -107,10 +107,10 @@ export function readLoopByName(projectId: string, loopName: string, dbPathOverri
     if (!row) return null
     
     const state = JSON.parse(row.data)
-    if (!state.worktreeName || !state.sessionId) return null
+    if (!state.loopName || !state.sessionId) return null
     
     return {
-      name: state.worktreeName,
+      name: state.loopName,
       phase: state.phase ?? 'coding',
       iteration: state.iteration ?? 0,
       maxIterations: state.maxIterations ?? 0,

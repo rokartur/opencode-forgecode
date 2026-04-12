@@ -52,7 +52,7 @@ describe('Tool Blocking Logic', () => {
       const state = {
         active: true,
         sessionId: sessionID,
-        worktreeName: 'test-worktree',
+        loopName: 'test-worktree',
         worktreeDir: '/test/worktree',
         worktreeBranch: 'opencode/loop-test',
         iteration: 1,
@@ -82,7 +82,7 @@ describe('Tool Blocking Logic', () => {
       const inactiveState = {
         active: false,
         sessionId: sessionID,
-        worktreeName: 'test-worktree',
+        loopName: 'test-worktree',
         worktreeDir: '/test/worktree',
         worktreeBranch: 'opencode/loop-test',
         iteration: 1,

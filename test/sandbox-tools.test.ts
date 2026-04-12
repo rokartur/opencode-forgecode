@@ -14,7 +14,7 @@ interface MockSandboxContext {
 
 interface MockDeps {
   loopService: {
-    resolveWorktreeName: (sessionId: string) => string | null
+    resolveLoopName: (sessionId: string) => string | null
     getActiveState: (name: string) => { active: boolean; sandbox?: boolean } | null
   }
   sandboxManager: {
@@ -64,7 +64,7 @@ describe('sandbox tool hooks', () => {
     }
 
     mockLoopService = {
-      resolveWorktreeName: (sessionId) => sessionId === TEST_SESSION_ID ? 'test-worktree' : null,
+      resolveLoopName: (sessionId) => sessionId === TEST_SESSION_ID ? 'test-worktree' : null,
       getActiveState: (name) => name === 'test-worktree' ? { active: true, sandbox: true } : null,
     }
 
@@ -78,6 +78,8 @@ describe('sandbox tool hooks', () => {
 
     mockLogger = {
       log: () => {},
+      error: () => {},
+      debug: () => {},
     }
 
     const deps: MockDeps = {
@@ -96,7 +98,7 @@ describe('sandbox tool hooks', () => {
     test('bash is not intercepted when no sandbox session is resolved', async () => {
       const deps: MockDeps = {
         loopService: {
-          resolveWorktreeName: () => null,
+          resolveLoopName: () => null,
           getActiveState: () => null,
         },
         sandboxManager: null,
@@ -115,7 +117,7 @@ describe('sandbox tool hooks', () => {
     test('glob is not intercepted when no sandbox session is resolved', async () => {
       const deps: MockDeps = {
         loopService: {
-          resolveWorktreeName: () => null,
+          resolveLoopName: () => null,
           getActiveState: () => null,
         },
         sandboxManager: null,
@@ -134,7 +136,7 @@ describe('sandbox tool hooks', () => {
     test('grep is not intercepted when no sandbox session is resolved', async () => {
       const deps: MockDeps = {
         loopService: {
-          resolveWorktreeName: () => null,
+          resolveLoopName: () => null,
           getActiveState: () => null,
         },
         sandboxManager: null,
@@ -165,7 +167,7 @@ describe('sandbox tool hooks', () => {
         },
       }
 
-      await beforeHook(input as never, output as never)
+      await beforeHook!(input as never, output as never)
 
       expect(output.args).toBeDefined()
     })
@@ -186,8 +188,8 @@ describe('sandbox tool hooks', () => {
         metadata: undefined,
       }
 
-      await beforeHook(input as never, output as never)
-      await afterHook({ ...input, args: output.args } as never, output as never)
+      await beforeHook!(input as never, output as never)
+      await afterHook!({ ...input, args: output.args } as never, output as never)
 
       expect(output.output).toContain(TEST_HOST_DIR)
       expect(output.output).toContain('file.ts')
@@ -212,8 +214,8 @@ describe('sandbox tool hooks', () => {
         metadata: undefined,
       }
 
-      await beforeHook(input as never, output as never)
-      await afterHook({ ...input, args: output.args } as never, output as never)
+      await beforeHook!(input as never, output as never)
+      await afterHook!({ ...input, args: output.args } as never, output as never)
 
       expect(output.output).toContain('Found')
       expect(output.output).toContain('matches')
@@ -235,8 +237,8 @@ describe('sandbox tool hooks', () => {
         metadata: undefined,
       }
 
-      await beforeHook(input as never, output as never)
-      await afterHook({ ...input, args: output.args } as never, output as never)
+      await beforeHook!(input as never, output as never)
+      await afterHook!({ ...input, args: output.args } as never, output as never)
 
       expect(output.output).toContain('Line 10:')
       expect(output.output).toContain('console.log')
@@ -258,7 +260,7 @@ describe('sandbox tool hooks', () => {
         metadata: undefined,
       }
 
-      await beforeHook(input as never, output as never)
+      await beforeHook!(input as never, output as never)
 
       expect(output.args).toBeDefined()
     })
@@ -280,8 +282,8 @@ describe('sandbox tool hooks', () => {
         metadata: undefined,
       }
 
-      await beforeHook(input as never, output as never)
-      await afterHook({ ...input, args: output.args } as never, output as never)
+      await beforeHook!(input as never, output as never)
+      await afterHook!({ ...input, args: output.args } as never, output as never)
 
       expect(output.output).toContain('echo "test output"')
     })
@@ -301,8 +303,8 @@ describe('sandbox tool hooks', () => {
         metadata: undefined,
       }
 
-      await beforeHook(input as never, output as never)
-      await afterHook({ ...input, args: output.args } as never, output as never)
+      await beforeHook!(input as never, output as never)
+      await afterHook!({ ...input, args: output.args } as never, output as never)
 
       expect(output.output).toContain('Git push is not available')
     })

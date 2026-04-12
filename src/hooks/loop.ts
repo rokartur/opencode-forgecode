@@ -13,8 +13,8 @@ export interface LoopEventHandler {
   onEvent(input: { event: { type: string; properties?: Record<string, unknown> } }): Promise<void>
   terminateAll(): void
   clearAllRetryTimeouts(): void
-  startWatchdog(worktreeName: string): void
-  getStallInfo(worktreeName: string): { consecutiveStalls: number; lastActivityTime: number } | null
+  startWatchdog(loopName: string): void
+  getStallInfo(loopName: string): { consecutiveStalls: number; lastActivityTime: number } | null
   cancelBySessionId(sessionId: string): Promise<boolean>
 }
 
@@ -34,14 +34,14 @@ export function createLoopEventHandler(
   const watchdogRunning = new Map<string, boolean>()
   const stateLocks = new Map<string, Promise<void>>()
 
-  function withStateLock(worktreeName: string, fn: () => Promise<void>): Promise<void> {
-    const prev = stateLocks.get(worktreeName) ?? Promise.resolve()
+  function withStateLock(loopName: string, fn: () => Promise<void>): Promise<void> {
+    const prev = stateLocks.get(loopName) ?? Promise.resolve()
     const next = prev.then(fn, fn).finally(() => {
-      if (stateLocks.get(worktreeName) === next) {
-        stateLocks.delete(worktreeName)
+      if (stateLocks.get(loopName) === next) {
+        stateLocks.delete(loopName)
       }
     })
-    stateLocks.set(worktreeName, next)
+    stateLocks.set(loopName, next)
     return next
   }
 
@@ -67,7 +67,7 @@ export function createLoopEventHandler(
       const status = statusResult.stdout.trim()
 
       if (status) {
-        const message = `loop: ${state.worktreeName} completed after ${state.iteration} iterations`
+        const message = `loop: ${state.loopName} completed after ${state.iteration} iterations`
         const commitResult = spawnSync('git', ['commit', '-m', message], { cwd: state.worktreeDir, encoding: 'utf-8' })
         if (commitResult.status !== 0) {
           throw new Error(commitResult.stderr || 'git commit failed')
@@ -99,37 +99,37 @@ export function createLoopEventHandler(
     return { committed, cleaned }
   }
 
-  function stopWatchdog(worktreeName: string): void {
-    const interval = stallWatchdogs.get(worktreeName)
+  function stopWatchdog(loopName: string): void {
+    const interval = stallWatchdogs.get(loopName)
     if (interval) {
       clearInterval(interval)
-      stallWatchdogs.delete(worktreeName)
+      stallWatchdogs.delete(loopName)
     }
-    lastActivityTime.delete(worktreeName)
-    consecutiveStalls.delete(worktreeName)
-    watchdogRunning.delete(worktreeName)
+    lastActivityTime.delete(loopName)
+    consecutiveStalls.delete(loopName)
+    watchdogRunning.delete(loopName)
   }
 
-  function startWatchdog(worktreeName: string): void {
-    stopWatchdog(worktreeName)
-    lastActivityTime.set(worktreeName, Date.now())
-    consecutiveStalls.set(worktreeName, 0)
+  function startWatchdog(loopName: string): void {
+    stopWatchdog(loopName)
+    lastActivityTime.set(loopName, Date.now())
+    consecutiveStalls.set(loopName, 0)
 
     const stallTimeout = loopService.getStallTimeoutMs()
 
     const interval = setInterval(async () => {
-      if (watchdogRunning.get(worktreeName)) return
-      watchdogRunning.set(worktreeName, true)
+      if (watchdogRunning.get(loopName)) return
+      watchdogRunning.set(loopName, true)
       try {
-        const lastActivity = lastActivityTime.get(worktreeName)
+        const lastActivity = lastActivityTime.get(loopName)
         if (!lastActivity) return
 
         const elapsed = Date.now() - lastActivity
         if (elapsed < stallTimeout) return
 
-        const state = loopService.getActiveState(worktreeName)
+        const state = loopService.getActiveState(loopName)
         if (!state?.active) {
-          stopWatchdog(worktreeName)
+          stopWatchdog(loopName)
           return
         }
 
@@ -143,8 +143,8 @@ export function createLoopEventHandler(
           const hasActiveWork = status === 'busy' || status === 'retry'
 
           if (hasActiveWork) {
-            lastActivityTime.set(worktreeName, Date.now())
-            logger.log(`Loop watchdog: worktree ${worktreeName} has active work (${status}), resetting timer`)
+            lastActivityTime.set(loopName, Date.now())
+            logger.log(`Loop watchdog: loop ${loopName} has active work (${status}), resetting timer`)
             return
           }
         } catch (err) {
@@ -152,63 +152,63 @@ export function createLoopEventHandler(
           statusCheckFailed = true
         }
 
-        const stallCount = (consecutiveStalls.get(worktreeName) ?? 0) + 1
-        consecutiveStalls.set(worktreeName, stallCount)
-        lastActivityTime.set(worktreeName, Date.now())
+        const stallCount = (consecutiveStalls.get(loopName) ?? 0) + 1
+        consecutiveStalls.set(loopName, stallCount)
+        lastActivityTime.set(loopName, Date.now())
 
         if (stallCount >= MAX_CONSECUTIVE_STALLS) {
-          logger.error(`Loop watchdog: worktree ${worktreeName} exceeded max consecutive stalls (${MAX_CONSECUTIVE_STALLS}), terminating`)
-          await terminateLoop(worktreeName, state, 'stall_timeout')
+          logger.error(`Loop watchdog: loop ${loopName} exceeded max consecutive stalls (${MAX_CONSECUTIVE_STALLS}), terminating`)
+          await terminateLoop(loopName, state, 'stall_timeout')
           return
         }
 
-        logger.log(`Loop watchdog: stall #${stallCount}/${MAX_CONSECUTIVE_STALLS} for ${worktreeName} (phase=${state.phase}, elapsed=${elapsed}ms, statusCheckFailed=${statusCheckFailed}), re-triggering`)
+        logger.log(`Loop watchdog: stall #${stallCount}/${MAX_CONSECUTIVE_STALLS} for ${loopName} (phase=${state.phase}, elapsed=${elapsed}ms, statusCheckFailed=${statusCheckFailed}), re-triggering`)
 
-        await withStateLock(worktreeName, async () => {
-          const freshState = loopService.getActiveState(worktreeName)
+        await withStateLock(loopName, async () => {
+          const freshState = loopService.getActiveState(loopName)
           if (!freshState?.active) return
 
           try {
             if (freshState.phase === 'auditing') {
-              await handleAuditingPhase(worktreeName, freshState)
+              await handleAuditingPhase(loopName, freshState)
             } else {
-              await handleCodingPhase(worktreeName, freshState)
+              await handleCodingPhase(loopName, freshState)
             }
           } catch (err) {
-            await handlePromptError(worktreeName, freshState, `watchdog recovery in ${freshState.phase} phase`, err)
+            await handlePromptError(loopName, freshState, `watchdog recovery in ${freshState.phase} phase`, err)
           }
         })
       } finally {
-        watchdogRunning.set(worktreeName, false)
+        watchdogRunning.set(loopName, false)
       }
     }, stallTimeout)
 
-    stallWatchdogs.set(worktreeName, interval)
-    logger.log(`Loop watchdog: started for worktree ${worktreeName} (timeout: ${stallTimeout}ms)`)
+    stallWatchdogs.set(loopName, interval)
+    logger.log(`Loop watchdog: started for loop ${loopName} (timeout: ${stallTimeout}ms)`)
   }
 
-  function getStallInfo(worktreeName: string): { consecutiveStalls: number; lastActivityTime: number } | null {
-    const lastActivity = lastActivityTime.get(worktreeName)
+  function getStallInfo(loopName: string): { consecutiveStalls: number; lastActivityTime: number } | null {
+    const lastActivity = lastActivityTime.get(loopName)
     if (lastActivity === undefined) return null
     return {
-      consecutiveStalls: consecutiveStalls.get(worktreeName) ?? 0,
+      consecutiveStalls: consecutiveStalls.get(loopName) ?? 0,
       lastActivityTime: lastActivity,
     }
   }
 
-  async function terminateLoop(worktreeName: string, state: LoopState, reason: string): Promise<void> {
+  async function terminateLoop(loopName: string, state: LoopState, reason: string): Promise<void> {
     const sessionId = state.sessionId
-    stopWatchdog(worktreeName)
+    stopWatchdog(loopName)
 
-    const retryTimeout = retryTimeouts.get(worktreeName)
+    const retryTimeout = retryTimeouts.get(loopName)
     if (retryTimeout) {
       clearTimeout(retryTimeout)
-      retryTimeouts.delete(worktreeName)
+      retryTimeouts.delete(loopName)
     }
 
-    loopService.unregisterSession(sessionId)
+    loopService.unregisterLoopSession(sessionId)
 
-    loopService.setState(worktreeName, {
+    loopService.setState(loopName, {
       ...state,
       active: false,
       completedAt: new Date().toISOString(),
@@ -221,7 +221,7 @@ export function createLoopEventHandler(
       // Session may already be idle
     }
 
-    logger.log(`Loop terminated: reason="${reason}", worktree="${state.worktreeName}", iteration=${state.iteration}`)
+    logger.log(`Loop terminated: reason="${reason}", loop="${state.loopName}", iteration=${state.iteration}`)
 
     if (v2Client.tui) {
       const toastVariant = reason === 'completed' ? 'success'
@@ -241,7 +241,7 @@ export function createLoopEventHandler(
         body: {
           type: 'tui.toast.show',
           properties: {
-            title: state.worktreeName,
+            title: state.loopName,
             message: toastMessage,
             variant: toastVariant,
             duration: reason === 'completed' ? 5000 : 3000,
@@ -258,18 +258,18 @@ export function createLoopEventHandler(
 
     if (state.sandbox && state.sandboxContainerName && sandboxManager) {
       try {
-        await sandboxManager.stop(state.worktreeName)
-        logger.log(`Loop: stopped sandbox container for ${state.worktreeName}`)
+        await sandboxManager.stop(state.loopName!)
+        logger.log(`Loop: stopped sandbox container for ${state.loopName}`)
       } catch (err) {
         logger.error(`Loop: failed to stop sandbox container`, err)
       }
     }
   }
 
-  async function handlePromptError(worktreeName: string, _state: LoopState, context: string, err: unknown, retryFn?: () => Promise<void>): Promise<void> {
-    const currentState = loopService.getActiveState(worktreeName)
+  async function handlePromptError(loopName: string, _state: LoopState, context: string, err: unknown, retryFn?: () => Promise<void>): Promise<void> {
+    const currentState = loopService.getActiveState(loopName)
     if (!currentState?.active) {
-      logger.log(`Loop: loop ${worktreeName} already terminated, ignoring error: ${context}`)
+      logger.log(`Loop: loop ${loopName} already terminated, ignoring error: ${context}`)
       return
     }
 
@@ -277,26 +277,26 @@ export function createLoopEventHandler(
     
     if (nextErrorCount < MAX_RETRIES) {
       logger.error(`Loop: ${context} (attempt ${nextErrorCount}/${MAX_RETRIES}), will retry`, err)
-      loopService.setState(worktreeName, { ...currentState, errorCount: nextErrorCount })
+      loopService.setState(loopName, { ...currentState, errorCount: nextErrorCount })
       if (retryFn) {
         const retryTimeout = setTimeout(async () => {
-          const freshState = loopService.getActiveState(worktreeName)
+          const freshState = loopService.getActiveState(loopName)
           if (!freshState?.active) {
             logger.log(`Loop: loop cancelled, skipping retry`)
-            retryTimeouts.delete(worktreeName)
+            retryTimeouts.delete(loopName)
             return
           }
           try {
             await retryFn()
           } catch (retryErr) {
-            await handlePromptError(worktreeName, freshState, context, retryErr, retryFn)
+            await handlePromptError(loopName, freshState, context, retryErr, retryFn)
           }
         }, 2000)
-        retryTimeouts.set(worktreeName, retryTimeout)
+        retryTimeouts.set(loopName, retryTimeout)
       }
     } else {
       logger.error(`Loop: ${context} (attempt ${nextErrorCount}/${MAX_RETRIES}), giving up`, err)
-      await terminateLoop(worktreeName, currentState, `error_max_retries: ${context}`)
+      await terminateLoop(loopName, currentState, `error_max_retries: ${context}`)
     }
   }
 
@@ -336,11 +336,11 @@ export function createLoopEventHandler(
     }
   }
 
-  async function rotateSession(worktreeName: string, state: LoopState): Promise<string> {
+  async function rotateSession(loopName: string, state: LoopState): Promise<string> {
     const oldSessionId = state.sessionId
 
     const createParams = {
-      title: state.worktreeName,
+      title: state.loopName,
       directory: state.worktreeDir,
       permission: LOOP_PERMISSION_RULESET,
     }
@@ -353,17 +353,17 @@ export function createLoopEventHandler(
 
     const newSessionId = createResult.data.id
 
-    const oldRetryTimeout = retryTimeouts.get(worktreeName)
+    const oldRetryTimeout = retryTimeouts.get(loopName)
     if (oldRetryTimeout) {
       clearTimeout(oldRetryTimeout)
-      retryTimeouts.delete(worktreeName)
+      retryTimeouts.delete(loopName)
     }
 
-    loopService.unregisterSession(oldSessionId)
-    loopService.registerSession(newSessionId, worktreeName)
+    loopService.unregisterLoopSession(oldSessionId)
+    loopService.registerLoopSession(newSessionId, loopName)
 
-    stopWatchdog(worktreeName)
-    startWatchdog(worktreeName)
+    stopWatchdog(loopName)
+    startWatchdog(loopName)
 
     v2Client.session.delete({ sessionID: oldSessionId, directory: state.worktreeDir }).catch((err) => {
       logger.error(`Loop: failed to delete old session ${oldSessionId}`, err)
@@ -386,7 +386,7 @@ export function createLoopEventHandler(
    * Returns updated { assistantErrorDetected, currentState }.
    */
   async function detectAndHandleAssistantError(
-    worktreeName: string,
+    loopName: string,
     currentState: LoopState,
     assistantError: string | null,
     phase: string,
@@ -400,12 +400,12 @@ export function createLoopEventHandler(
     if (isModelError) {
       const nextErrorCount = (currentState.errorCount ?? 0) + 1
       if (nextErrorCount >= MAX_RETRIES) {
-        await terminateLoop(worktreeName, currentState, `error_max_retries: assistant error: ${assistantError}`)
+        await terminateLoop(loopName, currentState, `error_max_retries: assistant error: ${assistantError}`)
         return null
       }
-      loopService.setState(worktreeName, { ...currentState, modelFailed: true, errorCount: nextErrorCount })
+      loopService.setState(loopName, { ...currentState, modelFailed: true, errorCount: nextErrorCount })
       logger.log(`Loop: marking model as failed, will fall back to default model (error ${nextErrorCount}/${MAX_RETRIES})`)
-      return { assistantErrorDetected: true, currentState: loopService.getActiveState(worktreeName)! }
+      return { assistantErrorDetected: true, currentState: loopService.getActiveState(loopName)! }
     }
 
     return { assistantErrorDetected: true, currentState }
@@ -416,7 +416,7 @@ export function createLoopEventHandler(
    * Returns true if the loop was terminated (caller should return).
    */
   async function checkCompletionAndTerminate(
-    worktreeName: string,
+    loopName: string,
     currentState: LoopState,
     textContent: string | null,
     auditCount: number,
@@ -429,7 +429,7 @@ export function createLoopEventHandler(
         logger.log(`Loop: completion promise detected but outstanding review findings remain, continuing`)
         return false
       }
-      await terminateLoop(worktreeName, currentState, 'completed')
+      await terminateLoop(loopName, currentState, 'completed')
       logger.log(`Loop completed: detected ${currentState.completionSignal} at iteration ${currentState.iteration} (${auditCount}/${minAudits} audits)`)
       return true
     }
@@ -441,11 +441,11 @@ export function createLoopEventHandler(
   /**
    * Shared: reset error count after a successful (non-error) iteration.
    */
-  function resetErrorCountIfNeeded(worktreeName: string, currentState: LoopState, assistantErrorDetected: boolean, phase: string): LoopState {
+  function resetErrorCountIfNeeded(loopName: string, currentState: LoopState, assistantErrorDetected: boolean, phase: string): LoopState {
     if (!assistantErrorDetected && currentState.errorCount && currentState.errorCount > 0) {
-      loopService.setState(worktreeName, { ...currentState, errorCount: 0, modelFailed: false })
+      loopService.setState(loopName, { ...currentState, errorCount: 0, modelFailed: false })
       logger.log(`Loop: resetting error count after successful retry in ${phase} phase`)
-      return loopService.getActiveState(worktreeName)!
+      return loopService.getActiveState(loopName)!
     }
     return currentState
   }
@@ -454,7 +454,7 @@ export function createLoopEventHandler(
    * Shared: rotate session and send continuation prompt with model fallback.
    */
   async function rotateAndSendContinuation(
-    worktreeName: string,
+    loopName: string,
     currentState: LoopState,
     stateUpdates: Partial<LoopState>,
     continuationPrompt: string,
@@ -463,12 +463,12 @@ export function createLoopEventHandler(
   ): Promise<void> {
     let activeSessionId = currentState.sessionId
     try {
-      activeSessionId = await rotateSession(worktreeName, currentState)
+      activeSessionId = await rotateSession(loopName, currentState)
     } catch (err) {
       logger.error(`Loop: session rotation failed, continuing with existing session`, err)
     }
 
-    loopService.setState(worktreeName, {
+    loopService.setState(loopName, {
       ...currentState,
       sessionId: activeSessionId,
       errorCount: assistantErrorDetected ? currentState.errorCount : 0,
@@ -480,13 +480,13 @@ export function createLoopEventHandler(
     logger.log(`Loop iteration ${nextIteration} for session ${activeSessionId}`)
 
     const currentConfig = getConfig()
-    const loopModel = resolveLoopModel(currentConfig, loopService, worktreeName)
+    const loopModel = resolveLoopModel(currentConfig, loopService, loopName)
     if (!loopModel) {
       logger.log(`Loop: configured model previously failed, using default model`)
     }
 
     const sendWithModel = async () => {
-      const freshState = loopService.getActiveState(worktreeName)
+      const freshState = loopService.getActiveState(loopName)
       if (!freshState?.active) {
         throw new Error('loop_cancelled')
       }
@@ -500,7 +500,7 @@ export function createLoopEventHandler(
     }
 
     const sendWithoutModel = async () => {
-      const freshState = loopService.getActiveState(worktreeName)
+      const freshState = loopService.getActiveState(loopName)
       if (!freshState?.active) {
         throw new Error('loop_cancelled')
       }
@@ -521,17 +521,17 @@ export function createLoopEventHandler(
 
     if (promptResult.error) {
       const retryFn = async () => {
-        const freshState = loopService.getActiveState(worktreeName)
+        const freshState = loopService.getActiveState(loopName)
         if (!freshState?.active) {
           throw new Error('loop_cancelled')
         }
         const result = await sendWithoutModel()
         if (result.error) {
-          await handlePromptError(worktreeName, currentState, `retry failed ${errorContext}`, result.error)
+          await handlePromptError(loopName, currentState, `retry failed ${errorContext}`, result.error)
           return
         }
       }
-      await handlePromptError(worktreeName, currentState, `failed to send continuation prompt ${errorContext}`, promptResult.error, retryFn)
+      await handlePromptError(loopName, currentState, `failed to send continuation prompt ${errorContext}`, promptResult.error, retryFn)
       return
     }
 
@@ -541,19 +541,19 @@ export function createLoopEventHandler(
       logger.log(`${errorContext} using default model (fallback)`)
     }
 
-    consecutiveStalls.set(worktreeName, 0)
+    consecutiveStalls.set(loopName, 0)
   }
 
-  async function handleCodingPhase(worktreeName: string, _state: LoopState): Promise<void> {
-    let currentState = loopService.getActiveState(worktreeName)
+  async function handleCodingPhase(loopName: string, _state: LoopState): Promise<void> {
+    let currentState = loopService.getActiveState(loopName)
     if (!currentState?.active) {
-      logger.log(`Loop: loop ${worktreeName} no longer active, skipping coding phase`)
+      logger.log(`Loop: loop ${loopName} no longer active, skipping coding phase`)
       return
     }
 
     if (!currentState.worktreeDir) {
-      logger.error(`Loop: loop ${worktreeName} missing worktreeDir in coding phase, terminating`)
-      await terminateLoop(worktreeName, currentState, 'missing_worktree_dir')
+      logger.error(`Loop: loop ${loopName} missing worktreeDir in coding phase, terminating`)
+      await terminateLoop(loopName, currentState, 'missing_worktree_dir')
       return
     }
 
@@ -565,23 +565,23 @@ export function createLoopEventHandler(
         return
       }
 
-      const errorResult = await detectAndHandleAssistantError(worktreeName, currentState, assistantError, 'coding')
+      const errorResult = await detectAndHandleAssistantError(loopName, currentState, assistantError, 'coding')
       if (!errorResult) return
       assistantErrorDetected = errorResult.assistantErrorDetected
       currentState = errorResult.currentState
 
-      if (await checkCompletionAndTerminate(worktreeName, currentState, textContent, currentState.auditCount ?? 0)) return
+      if (await checkCompletionAndTerminate(loopName, currentState, textContent, currentState.auditCount ?? 0)) return
     }
 
-    currentState = resetErrorCountIfNeeded(worktreeName, currentState, assistantErrorDetected, 'coding')
+    currentState = resetErrorCountIfNeeded(loopName, currentState, assistantErrorDetected, 'coding')
 
     if ((currentState.maxIterations ?? 0) > 0 && (currentState.iteration ?? 0) >= (currentState.maxIterations ?? 0)) {
-      await terminateLoop(worktreeName, currentState, 'max_iterations')
+      await terminateLoop(loopName, currentState, 'max_iterations')
       return
     }
 
     if (currentState.audit) {
-      loopService.setState(worktreeName, { ...currentState, phase: 'auditing', errorCount: 0 })
+      loopService.setState(loopName, { ...currentState, phase: 'auditing', errorCount: 0 })
       logger.log(`Loop iteration ${currentState.iteration ?? 0} complete, running auditor for session ${currentState.sessionId}`)
 
       const auditPrompt = {
@@ -604,7 +604,7 @@ export function createLoopEventHandler(
             throw result.error
           }
         }
-        await handlePromptError(worktreeName, { ...currentState, phase: 'coding' }, 'failed to send audit prompt', promptResult.error, retryFn)
+        await handlePromptError(loopName, { ...currentState, phase: 'coding' }, 'failed to send audit prompt', promptResult.error, retryFn)
         return
       }
 
@@ -612,7 +612,7 @@ export function createLoopEventHandler(
       const configuredModel = currentConfig.auditorModel ?? currentConfig.loop?.model ?? currentConfig.executionModel
       logger.log(`auditor using agent-configured model: ${configuredModel ?? 'default'}`)
 
-      consecutiveStalls.set(worktreeName, 0)
+      consecutiveStalls.set(loopName, 0)
       return
     }
 
@@ -620,7 +620,7 @@ export function createLoopEventHandler(
     const continuationPrompt = loopService.buildContinuationPrompt({ ...currentState, iteration: nextIteration })
 
     await rotateAndSendContinuation(
-      worktreeName,
+      loopName,
       currentState,
       { iteration: nextIteration },
       continuationPrompt,
@@ -629,16 +629,16 @@ export function createLoopEventHandler(
     )
   }
 
-  async function handleAuditingPhase(worktreeName: string, _state: LoopState): Promise<void> {
-    let currentState = loopService.getActiveState(worktreeName)
+  async function handleAuditingPhase(loopName: string, _state: LoopState): Promise<void> {
+    let currentState = loopService.getActiveState(loopName)
     if (!currentState?.active) {
-      logger.log(`Loop: loop ${worktreeName} no longer active, skipping auditing phase`)
+      logger.log(`Loop: loop ${loopName} no longer active, skipping auditing phase`)
       return
     }
 
     if (!currentState.worktreeDir) {
-      logger.error(`Loop: loop ${worktreeName} missing worktreeDir in auditing phase, terminating`)
-      await terminateLoop(worktreeName, currentState, 'missing_worktree_dir')
+      logger.error(`Loop: loop ${loopName} missing worktreeDir in auditing phase, terminating`)
+      await terminateLoop(loopName, currentState, 'missing_worktree_dir')
       return
     }
 
@@ -649,12 +649,12 @@ export function createLoopEventHandler(
       return
     }
 
-    const errorResult = await detectAndHandleAssistantError(worktreeName, currentState, assistantError, 'auditing')
+    const errorResult = await detectAndHandleAssistantError(loopName, currentState, assistantError, 'auditing')
     if (!errorResult) return
     const assistantErrorDetected = errorResult.assistantErrorDetected
     currentState = errorResult.currentState
 
-    currentState = resetErrorCountIfNeeded(worktreeName, currentState, assistantErrorDetected, 'auditing')
+    currentState = resetErrorCountIfNeeded(loopName, currentState, assistantErrorDetected, 'auditing')
 
     const nextIteration = (currentState.iteration ?? 0) + 1
     const newAuditCount = (currentState.auditCount ?? 0) + 1
@@ -662,10 +662,10 @@ export function createLoopEventHandler(
 
     const auditFindings = auditText ?? undefined
 
-    if (await checkCompletionAndTerminate(worktreeName, currentState, auditText, newAuditCount)) return
+    if (await checkCompletionAndTerminate(loopName, currentState, auditText, newAuditCount)) return
 
     if ((currentState.maxIterations ?? 0) > 0 && nextIteration > (currentState.maxIterations ?? 0)) {
-      await terminateLoop(worktreeName, currentState, 'max_iterations')
+      await terminateLoop(loopName, currentState, 'max_iterations')
       return
     }
 
@@ -675,7 +675,7 @@ export function createLoopEventHandler(
     )
 
     await rotateAndSendContinuation(
-      worktreeName,
+      loopName,
       currentState,
       {
         iteration: nextIteration,
@@ -701,7 +701,7 @@ export function createLoopEventHandler(
         const activeLoops = loopService.listActive()
         const affectedLoop = activeLoops.find((s) => s.worktreeDir === directory)
         if (affectedLoop) {
-          await terminateLoop(affectedLoop.worktreeName, affectedLoop, `worktree_failed: ${message}`)
+          await terminateLoop(affectedLoop.loopName!, affectedLoop, `worktree_failed: ${message}`)
         }
       }
       return
@@ -716,26 +716,26 @@ export function createLoopEventHandler(
       if (!eventSessionId) return
 
       if (isAbort) {
-        const worktreeName = loopService.resolveWorktreeName(eventSessionId)
-        if (!worktreeName) return
-        const state = loopService.getActiveState(worktreeName)
+        const loopName = loopService.resolveLoopName(eventSessionId)
+        if (!loopName) return
+        const state = loopService.getActiveState(loopName)
         if (state?.active) {
           logger.log(`Loop: session ${eventSessionId} aborted, terminating loop`)
-          await terminateLoop(worktreeName, state, 'user_aborted')
+          await terminateLoop(loopName, state, 'user_aborted')
         }
         return
       }
 
-      const worktreeName = loopService.resolveWorktreeName(eventSessionId)
-      if (!worktreeName) return
-      const state = loopService.getActiveState(worktreeName)
+      const loopName = loopService.resolveLoopName(eventSessionId)
+      if (!loopName) return
+      const state = loopService.getActiveState(loopName)
       if (state?.active) {
         const errorMessage = errorProps?.error?.data?.message ?? errorName ?? 'unknown error'
         logger.error(`Loop: session error for ${eventSessionId}: ${errorMessage}`)
         const isModelError = /provider|auth|model|api\s*error/i.test(errorMessage)
         if (isModelError && !state.modelFailed) {
           logger.log(`Loop: marking model as failed, will fall back to default on next iteration`)
-          loopService.setState(worktreeName, { ...state, modelFailed: true })
+          loopService.setState(loopName, { ...state, modelFailed: true })
         }
       }
       return
@@ -746,11 +746,11 @@ export function createLoopEventHandler(
     const sessionId = event.properties?.sessionID as string
     if (!sessionId) return
 
-    const worktreeName = loopService.resolveWorktreeName(sessionId)
-    if (!worktreeName) return
+    const loopName = loopService.resolveLoopName(sessionId)
+    if (!loopName) return
 
-    await withStateLock(worktreeName, async () => {
-      const state = loopService.getActiveState(worktreeName)
+    await withStateLock(loopName, async () => {
+      const state = loopService.getActiveState(loopName)
       if (!state || !state.active) return
 
       if (state.sessionId !== sessionId) {
@@ -759,16 +759,16 @@ export function createLoopEventHandler(
       }
 
       try {
-        startWatchdog(worktreeName)
+        startWatchdog(loopName)
         
         if (state.phase === 'auditing') {
-          await handleAuditingPhase(worktreeName, state)
+          await handleAuditingPhase(loopName, state)
         } else {
-          await handleCodingPhase(worktreeName, state)
+          await handleCodingPhase(loopName, state)
         }
       } catch (err) {
-        const freshState = loopService.getActiveState(worktreeName)
-        await handlePromptError(worktreeName, freshState ?? state, `unhandled error in ${(freshState ?? state).phase} phase`, err)
+        const freshState = loopService.getActiveState(loopName)
+        await handlePromptError(loopName, freshState ?? state, `unhandled error in ${(freshState ?? state).phase} phase`, err)
       }
     })
   }
@@ -794,11 +794,11 @@ export function createLoopEventHandler(
   }
 
   async function cancelBySessionId(sessionId: string): Promise<boolean> {
-    const worktreeName = loopService.resolveWorktreeName(sessionId)
-    if (!worktreeName) return false
-    const state = loopService.getActiveState(worktreeName)
+    const loopName = loopService.resolveLoopName(sessionId)
+    if (!loopName) return false
+    const state = loopService.getActiveState(loopName)
     if (!state?.active) return false
-    await terminateLoop(worktreeName, state, 'cancelled')
+    await terminateLoop(loopName, state, 'cancelled')
     return true
   }
 

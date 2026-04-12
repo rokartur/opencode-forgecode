@@ -81,14 +81,14 @@ export async function run(argv: RestartArgs): Promise<void> {
 
     if (argv.name) {
       const { match, candidates } = findPartialMatch(argv.name, loops, (l) => [
-        l.state.worktreeName,
+        l.state.loopName,
         l.state.worktreeBranch,
       ])
 
       if (!match && candidates.length > 0) {
         console.error(`Multiple loops match '${argv.name}':`)
         for (const c of candidates) {
-          console.error(`  - ${c.state.worktreeName}`)
+          console.error(`  - ${c.state.loopName}`)
         }
         console.error('')
         process.exit(1)
@@ -99,7 +99,7 @@ export async function run(argv: RestartArgs): Promise<void> {
         console.error('')
         console.error('Available loops:')
         for (const l of loops) {
-          console.error(`  - ${l.state.worktreeName}`)
+          console.error(`  - ${l.state.loopName}`)
         }
         console.error('')
         process.exit(1)
@@ -121,7 +121,7 @@ export async function run(argv: RestartArgs): Promise<void> {
         console.log('Multiple restartable loops. Please specify which one to restart:')
         console.log('')
         for (const l of restartableLoops) {
-          console.log(`  - ${l.state.worktreeName}`)
+          console.log(`  - ${l.state.loopName}`)
         }
         console.log('')
         console.log("Run 'oc-forge loop restart <name>' to restart a specific loop.")
@@ -139,14 +139,14 @@ export async function run(argv: RestartArgs): Promise<void> {
 
     if (state.terminationReason === 'completed') {
       console.log('')
-      console.log(`Loop "${state.worktreeName}" completed successfully and cannot be restarted.`)
+      console.log(`Loop "${state.loopName}" completed successfully and cannot be restarted.`)
       console.log('')
       process.exit(1)
     }
 
     if (!state.worktreeDir) {
       console.log('')
-      console.log(`Cannot restart "${state.worktreeName}": worktree directory is missing.`)
+      console.log(`Cannot restart "${state.loopName}": worktree directory is missing.`)
       console.log('')
       process.exit(1)
     }
@@ -155,7 +155,7 @@ export async function run(argv: RestartArgs): Promise<void> {
       const { existsSync } = await import('fs')
       if (!existsSync(state.worktreeDir)) {
         console.log('')
-        console.log(`Cannot restart "${state.worktreeName}": worktree directory no longer exists at ${state.worktreeDir}.`)
+        console.log(`Cannot restart "${state.loopName}": worktree directory no longer exists at ${state.worktreeDir}.`)
         console.log('')
         process.exit(1)
       }
@@ -164,13 +164,13 @@ export async function run(argv: RestartArgs): Promise<void> {
     if (state.active && !argv.force) {
       console.log('')
       console.log(`Loop to Force Restart:`)
-      console.log(`  Worktree:  ${state.worktreeName}`)
+      console.log(`  Loop:     ${state.loopName}`)
       console.log(`  Session:   ${state.sessionId}`)
       console.log(`  Iteration: ${state.iteration}/${state.maxIterations}`)
       console.log(`  Phase:     ${state.phase}`)
       console.log('')
 
-      const shouldProceed = await confirm(`Force restart active loop '${state.worktreeName}'`)
+      const shouldProceed = await confirm(`Force restart active loop '${state.loopName}'`)
 
       if (!shouldProceed) {
         console.log('Cancelled.')
@@ -193,7 +193,7 @@ export async function run(argv: RestartArgs): Promise<void> {
     }
 
     const createResult = await client.session.create({
-      title: state.worktreeName,
+      title: state.loopName,
       directory,
       permission: LOOP_PERMISSION_RULESET,
     })
@@ -209,7 +209,7 @@ export async function run(argv: RestartArgs): Promise<void> {
     db.prepare('INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(
       row.project_id,
       sessionKey,
-      JSON.stringify(state.worktreeName),
+      JSON.stringify(state.loopName),
       now + 30 * 24 * 60 * 60 * 1000,
       now,
     )
@@ -250,7 +250,7 @@ export async function run(argv: RestartArgs): Promise<void> {
     }
 
     console.log('')
-    console.log(`Restarted loop "${state.worktreeName}"`)
+    console.log(`Restarted loop "${state.loopName}"`)
     console.log('')
     console.log(`New session: ${newSessionId}`)
     console.log(`Continuing from iteration: ${state.iteration}`)
@@ -271,7 +271,7 @@ Usage:
   oc-forge loop restart [name] [options]
 
 Arguments:
-  name                  Worktree name to restart (optional if only one active)
+  name                  Loop name to restart (optional if only one active)
 
 Options:
   --force               Force restart an active loop without confirmation

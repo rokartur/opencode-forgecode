@@ -22,14 +22,14 @@ export function getDbPath(): string {
 /**
  * Resolves the plan key for a session, checking for loop-session mapping first.
  * 
- * Loop sessions store their plan under plan:{worktreeName}, while normal
+ * Loop sessions store their plan under plan:{loopName}, while normal
  * sessions use plan:{sessionId}. This function checks for a loop-session
  * mapping and returns the appropriate plan key.
  * 
  * @param projectId - The project ID (git commit hash)
  * @param sessionID - The session ID to resolve
  * @param dbPathOverride - Optional database path override (for testing)
- * @returns The resolved plan key (either plan:{worktreeName} or plan:{sessionID})
+ * @returns The resolved plan key (either plan:{loopName} or plan:{sessionID})
  */
 export function resolvePlanKey(projectId: string, sessionID: string, dbPathOverride?: string): string {
   const dbPath = dbPathOverride || getDbPath()
@@ -50,9 +50,9 @@ export function resolvePlanKey(projectId: string, sessionID: string, dbPathOverr
 
     if (mappingRow) {
       try {
-        const worktreeName = JSON.parse(mappingRow.data)
-        if (typeof worktreeName === 'string' && worktreeName) {
-          return `plan:${worktreeName}`
+        const loopName = JSON.parse(mappingRow.data)
+        if (typeof loopName === 'string' && loopName) {
+          return `plan:${loopName}`
         }
       } catch {
         // Fall through to default if JSON parse fails

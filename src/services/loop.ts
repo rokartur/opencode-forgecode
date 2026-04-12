@@ -47,7 +47,7 @@ export { LOOP_PERMISSION_RULESET } from '../constants/loop'
 export interface LoopState {
   active: boolean
   sessionId: string
-  worktreeName: string
+  loopName: string
   worktreeDir: string
   worktreeBranch?: string
   iteration: number
@@ -73,15 +73,15 @@ export interface LoopService {
   getAnyState(name: string): LoopState | null
   setState(name: string, state: LoopState): void
   deleteState(name: string): void
-  registerSession(sessionId: string, worktreeName: string): void
-  resolveWorktreeName(sessionId: string): string | null
-  unregisterSession(sessionId: string): void
+  registerLoopSession(sessionId: string, loopName: string): void
+  resolveLoopName(sessionId: string): string | null
+  unregisterLoopSession(sessionId: string): void
   checkCompletionSignal(text: string, promise: string): boolean
   buildContinuationPrompt(state: LoopState, auditFindings?: string): string
   buildAuditPrompt(state: LoopState): string
   listActive(): LoopState[]
   listRecent(): LoopState[]
-  findByWorktreeName(name: string): LoopState | null
+  findByLoopName(name: string): LoopState | null
   findCandidatesByPartialName(name: string): LoopState[]
   getStallTimeoutMs(): number
   getMinAudits(): number
@@ -89,7 +89,7 @@ export interface LoopService {
   reconcileStale(): number
   hasOutstandingFindings(branch?: string): boolean
   getOutstandingFindings(branch?: string): KvEntry[]
-  generateUniqueWorktreeName(baseName: string): string
+  generateUniqueLoopName(baseName: string): string
 }
 
 export function createLoopService(
@@ -100,12 +100,17 @@ export function createLoopService(
 ): LoopService {
   const stateKey = (name: string) => `loop:${name}`
 
+  function normalizeLoopState(state: LoopState | null): LoopState | null {
+    if (!state) return null
+    return state.loopName ? state : null
+  }
+
   function getAnyState(name: string): LoopState | null {
-    return kvService.get<LoopState>(projectId, stateKey(name))
+    return normalizeLoopState(kvService.get<LoopState>(projectId, stateKey(name)))
   }
 
   function getActiveState(name: string): LoopState | null {
-    const state = kvService.get<LoopState>(projectId, stateKey(name))
+    const state = normalizeLoopState(kvService.get<LoopState>(projectId, stateKey(name)))
     if (!state?.active) {
       return null
     }
@@ -113,22 +118,24 @@ export function createLoopService(
   }
 
   function setState(name: string, state: LoopState): void {
-    kvService.set(projectId, stateKey(name), state)
+    const normalized = normalizeLoopState(state)
+    if (!normalized) return
+    kvService.set(projectId, stateKey(name), normalized)
   }
 
   function deleteState(name: string): void {
     kvService.delete(projectId, stateKey(name))
   }
 
-  function registerSession(sessionId: string, worktreeName: string): void {
-    kvService.set(projectId, `loop-session:${sessionId}`, worktreeName)
+  function registerLoopSession(sessionId: string, loopName: string): void {
+    kvService.set(projectId, `loop-session:${sessionId}`, loopName)
   }
 
-  function resolveWorktreeName(sessionId: string): string | null {
+  function resolveLoopName(sessionId: string): string | null {
     return kvService.get<string>(projectId, `loop-session:${sessionId}`)
   }
 
-  function unregisterSession(sessionId: string): void {
+  function unregisterLoopSession(sessionId: string): void {
     kvService.delete(projectId, `loop-session:${sessionId}`)
   }
 
@@ -194,7 +201,7 @@ export function createLoopService(
   function listActive(): LoopState[] {
     const entries = kvService.listByPrefix(projectId, 'loop:')
     return entries
-      .map((entry) => entry.data)
+      .map((entry) => normalizeLoopState(entry.data as LoopState | null))
       .filter((data): data is LoopState =>
         data !== null && typeof data === 'object' && 'active' in data && (data as LoopState).active
       )
@@ -203,18 +210,18 @@ export function createLoopService(
   function listRecent(): LoopState[] {
     const entries = kvService.listByPrefix(projectId, 'loop:')
     return entries
-      .map((entry) => entry.data)
+      .map((entry) => normalizeLoopState(entry.data as LoopState | null))
       .filter((data): data is LoopState =>
         data !== null && typeof data === 'object' && 'active' in data && !(data as LoopState).active
       )
   }
 
-  function findByWorktreeName(name: string): LoopState | null {
+  function findByLoopName(name: string): LoopState | null {
     const active = listActive()
     const recent = listRecent()
     const allStates = [...active, ...recent]
 
-    const { match } = findPartialMatch(name, allStates, (s) => [s.worktreeName, s.worktreeBranch])
+    const { match } = findPartialMatch(name, allStates, (s) => [s.loopName, s.worktreeBranch])
     return match
   }
 
@@ -223,7 +230,7 @@ export function createLoopService(
     const recent = listRecent()
     const allStates = [...active, ...recent]
 
-    const { candidates } = findPartialMatch(name, allStates, (s) => [s.worktreeName, s.worktreeBranch])
+    const { candidates } = findPartialMatch(name, allStates, (s) => [s.loopName, s.worktreeBranch])
     return candidates
   }
 
@@ -244,7 +251,7 @@ export function createLoopService(
         completedAt: new Date().toISOString(),
         terminationReason: 'shutdown',
       }
-      setState(state.worktreeName, updated)
+      setState(state.loopName, updated)
     }
     logger.log(`Loop: terminated ${String(active.length)} active loop(s)`)
   }
@@ -252,13 +259,13 @@ export function createLoopService(
   function reconcileStale(): number {
     const active = listActive()
     for (const state of active) {
-      setState(state.worktreeName, {
+      setState(state.loopName, {
         ...state,
         active: false,
         completedAt: new Date().toISOString(),
         terminationReason: 'shutdown',
       })
-      logger.log(`Reconciled stale active loop: ${state.worktreeName} (was at iteration ${String(state.iteration)})`)
+      logger.log(`Reconciled stale active loop: ${state.loopName} (was at iteration ${String(state.iteration)})`)
     }
     return active.length
   }
@@ -276,10 +283,10 @@ export function createLoopService(
     return getOutstandingFindings(branch).length > 0
   }
 
-  function generateUniqueWorktreeName(baseName: string): string {
+  function generateUniqueLoopName(baseName: string): string {
     const existing = listRecent()
     const active = listActive()
-    const allNames = [...existing, ...active].map((s) => s.worktreeName)
+    const allNames = [...existing, ...active].map((s) => s.loopName)
     
     return generateUniqueName(baseName, allNames)
   }
@@ -289,15 +296,15 @@ export function createLoopService(
     getAnyState,
     setState,
     deleteState,
-    registerSession,
-    resolveWorktreeName,
-    unregisterSession,
+    registerLoopSession,
+    resolveLoopName,
+    unregisterLoopSession,
     checkCompletionSignal,
     buildContinuationPrompt,
     buildAuditPrompt,
     listActive,
     listRecent,
-    findByWorktreeName,
+    findByLoopName,
     findCandidatesByPartialName,
     getStallTimeoutMs,
     getMinAudits,
@@ -305,7 +312,7 @@ export function createLoopService(
     reconcileStale,
     hasOutstandingFindings,
     getOutstandingFindings,
-    generateUniqueWorktreeName,
+    generateUniqueLoopName,
   }
 }
 
