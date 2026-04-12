@@ -36,6 +36,19 @@ export interface GraphCacheEntry {
   displayName: string
 }
 
+function indexLegacyProjectHashes(nameMap: Map<string, string>): Map<string, string[]> {
+  const hashes = new Map<string, string[]>()
+
+  for (const projectId of nameMap.keys()) {
+    const hash = hashProjectId(projectId)
+    const ids = hashes.get(hash) ?? []
+    ids.push(projectId)
+    hashes.set(hash, ids)
+  }
+
+  return hashes
+}
+
 /**
  * Hashes a project ID using SHA256 and returns the first 16 hex characters.
  * This matches the hashing logic used in src/graph/database.ts
@@ -117,6 +130,8 @@ export function hasGraphCache(projectId: string, dataDir?: string): boolean {
 export function enumerateGraphCache(dataDir?: string): GraphCacheEntry[] {
   const resolvedDataDir = dataDir ?? resolveDataDir()
   const graphBaseDir = join(resolvedDataDir, 'graph')
+  const nameMap = resolveProjectNames()
+  const legacyProjectHashes = indexLegacyProjectHashes(nameMap)
   
   if (!existsSync(graphBaseDir)) {
     return []
@@ -146,9 +161,15 @@ export function enumerateGraphCache(dataDir?: string): GraphCacheEntry[] {
         if (metadata) {
           projectId = metadata.projectId
           cwdScope = metadata.cwd
-          const nameMap = resolveProjectNames()
           projectName = nameMap.get(projectId) ?? null
           resolutionStatus = 'known'
+        } else {
+          const matchingProjectIds = legacyProjectHashes.get(hashDir) ?? []
+          if (matchingProjectIds.length === 1) {
+            projectId = matchingProjectIds[0]
+            projectName = nameMap.get(projectId) ?? null
+            resolutionStatus = 'known'
+          }
         }
       }
       
@@ -197,11 +218,16 @@ export function findGraphCacheEntry(
   dataDir?: string
 ): GraphCacheEntry | null {
   const entries = enumerateGraphCache(dataDir)
+  const hashMatch = entries.find(entry => entry.hashDir === identifier)
+
+  if (hashMatch) {
+    return hashMatch
+  }
+
+  const projectMatches = entries.filter(entry => entry.projectId === identifier)
   
-  for (const entry of entries) {
-    if (entry.projectId === identifier || entry.hashDir === identifier) {
-      return entry
-    }
+  if (projectMatches.length === 1) {
+    return projectMatches[0]
   }
   
   return null

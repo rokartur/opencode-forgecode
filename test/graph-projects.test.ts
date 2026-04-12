@@ -290,6 +290,22 @@ describe('graph-projects with opencode.db mapping', () => {
     expect(entries[0].resolutionStatus).toBe('known')
   })
 
+  test('should resolve legacy cache identity from project hash when metadata is missing', () => {
+    const cacheDir = resolveGraphCacheDirLegacy(testProjectId, testDataDir)
+    mkdirSync(cacheDir, { recursive: true })
+    const dbPath = join(cacheDir, 'graph.db')
+    new Database(dbPath).close()
+
+    const entries = enumerateGraphCache(testDataDir)
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0].hashDir).toBe(testHashDir)
+    expect(entries[0].projectId).toBe(testProjectId)
+    expect(entries[0].projectName).toBe(testProjectId)
+    expect(entries[0].resolutionStatus).toBe('known')
+    expect(entries[0].cwdScope).toBeNull()
+  })
+
   test('REGRESSION: graph cache identity must include cwd scope, not just project ID', () => {
     const sharedProjectId = 'shared-project-' + Date.now()
     const cwd1 = '/fake/path/worktree1'
