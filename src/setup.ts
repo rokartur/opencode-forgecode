@@ -121,17 +121,14 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
     messagesTransform: config.messagesTransform,
     executionModel: config.executionModel,
     auditorModel: config.auditorModel,
-    loop: config.loop ?? config.ralph,
+    loop: config.loop,
     tui: config.tui,
     agents: config.agents,
     sandbox: config.sandbox,
     graph: config.graph,
   }
   
-  if (config.ralph && !config.loop) {
-    console.warn('[forge] Config key "ralph" is deprecated, use "loop" instead')
-  }
-  
+
   if (normalized.sandbox) {
     normalized.sandbox.mode = normalized.sandbox.mode || 'off'
   }

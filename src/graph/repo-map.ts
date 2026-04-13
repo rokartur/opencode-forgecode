@@ -450,7 +450,7 @@ export class RepoMap {
     const shapeHashes = await this.treeSitter.getShapeHashes(filePath)
 
     // Pre-compute token data
-    let tokenSignatures: Array<{ name: string; line: number; endLine: number; minhash: Uint32Array }> = []
+    const tokenSignatures: Array<{ name: string; line: number; endLine: number; minhash: Uint32Array }> = []
     let fragmentHashes: Array<{ hash: string; tokenOffset: number }> = []
     try {
       const cachedContent = await this.cache.get(absPath) || ''
