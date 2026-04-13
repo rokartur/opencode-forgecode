@@ -351,4 +351,61 @@ describe('GraphService status emission', () => {
     await service1.close()
     await service2.close()
   })
+
+  test('REGRESSION: close() during pending debounce completes without awaiting queued flush', async () => {
+    const logger = createTestLogger()
+    
+    const service = createGraphService({
+      projectId: testProjectId,
+      dataDir: testDir,
+      cwd: testDir,
+      logger,
+      watch: false,
+      debounceMs: 5000,
+    })
+
+    await service.scan()
+
+    const file1 = join(testDir, 'file1.ts')
+    writeFileSync(file1, 'export const a = 1')
+
+    service.onFileChanged(file1)
+
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    const closePromise = service.close()
+
+    await Promise.race([
+      closePromise.then(() => 'closed'),
+      new Promise(resolve => setTimeout(() => resolve('timeout'), 1000)),
+    ])
+
+    expect(service.ready).toBe(false)
+  })
+
+  test('REGRESSION: onFileChanged after shutdown start is ignored', async () => {
+    const logger = createTestLogger()
+    
+    const service = createGraphService({
+      projectId: testProjectId,
+      dataDir: testDir,
+      cwd: testDir,
+      logger,
+      watch: false,
+      debounceMs: 100,
+    })
+
+    await service.scan()
+
+    await service.close()
+
+    const file2 = join(testDir, 'file2.ts')
+    writeFileSync(file2, 'export const b = 2')
+
+    expect(() => {
+      service.onFileChanged(file2)
+    }).not.toThrow()
+
+    expect(service.ready).toBe(false)
+  })
 })

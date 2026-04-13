@@ -220,3 +220,214 @@ describe('graph-status tool', () => {
     expect(result).toContain('Files:')
   })
 })
+
+describe('graph tools error state handling', () => {
+  test('graph-status should report error state from KV store', async () => {
+    const mockService = {
+      ready: false,
+      scan: async () => {},
+      close: async () => {},
+      getStats: async () => ({ files: 0, symbols: 0, edges: 0, calls: 0 }),
+    } as any
+    
+    const mockKvService = {
+      get: (_projectId: string, key: string) => {
+        if (key === 'graph:status') {
+          return {
+            state: 'error',
+            message: 'Graph index incomplete: 5 files and 100 symbols indexed but 0 dependency edges generated',
+            stats: { files: 5, symbols: 100, edges: 0, calls: 0 },
+          }
+        }
+        return null
+      },
+    } as any
+    
+    const mockCtx = {
+      graphService: mockService,
+      logger: console as any,
+      projectId: 'test',
+      directory: '/test',
+      config: {},
+      db: {} as any,
+      dataDir: '/test/data',
+      kvService: mockKvService,
+      loopService: {} as any,
+      loopHandler: {} as any,
+      v2: {} as any,
+      cleanup: async () => {},
+      input: {} as any,
+      sandboxManager: null,
+    } as any
+    
+    const tools = createGraphTools(mockCtx)
+    
+    const result = await tools['graph-status'].execute({
+      action: 'status',
+    } as any)
+    
+    expect(result).toContain('State: error')
+    expect(result).toContain('Graph index incomplete')
+    expect(result).toContain('Files: 5')
+  })
+
+  test('graph-query should report error state from KV store', async () => {
+    const mockService = {
+      ready: false,
+    } as any
+    
+    const mockKvService = {
+      get: (_projectId: string, key: string) => {
+        if (key === 'graph:status') {
+          return {
+            state: 'error',
+            message: 'Graph index incomplete: 5 files and 100 symbols indexed but 0 dependency edges generated',
+          }
+        }
+        return null
+      },
+    } as any
+    
+    const mockCtx = {
+      graphService: mockService,
+      logger: console as any,
+      projectId: 'test',
+      directory: '/test',
+      config: {},
+      db: {} as any,
+      dataDir: '/test/data',
+      kvService: mockKvService,
+      loopService: {} as any,
+      loopHandler: {} as any,
+      v2: {} as any,
+      cleanup: async () => {},
+      input: {} as any,
+      sandboxManager: null,
+    } as any
+    
+    const tools = createGraphTools(mockCtx)
+    
+    const result = await tools['graph-query'].execute({
+      action: 'top_files',
+    } as any)
+    
+    expect(result).toContain('Graph index unavailable')
+    expect(result).toContain('Graph index incomplete')
+  })
+
+  test('graph-query should use generic message when not ready but no error state', async () => {
+    const mockService = {
+      ready: false,
+    } as any
+    
+    const mockKvService = {
+      get: () => null,
+    } as any
+    
+    const mockCtx = {
+      graphService: mockService,
+      logger: console as any,
+      projectId: 'test',
+      directory: '/test',
+      config: {},
+      db: {} as any,
+      dataDir: '/test/data',
+      kvService: mockKvService,
+      loopService: {} as any,
+      loopHandler: {} as any,
+      v2: {} as any,
+      cleanup: async () => {},
+      input: {} as any,
+      sandboxManager: null,
+    } as any
+    
+    const tools = createGraphTools(mockCtx)
+    
+    const result = await tools['graph-query'].execute({
+      action: 'top_files',
+    } as any)
+    
+    expect(result).toContain('Graph not indexed yet')
+  })
+
+  test('graph-symbols should report error state from KV store', async () => {
+    const mockService = {
+      ready: false,
+    } as any
+    
+    const mockKvService = {
+      get: (_projectId: string, key: string) => {
+        if (key === 'graph:status') {
+          return {
+            state: 'error',
+            message: 'Graph index incomplete: 5 files and 100 symbols indexed but 0 dependency edges generated',
+          }
+        }
+        return null
+      },
+    } as any
+    
+    const mockCtx = {
+      graphService: mockService,
+      logger: console as any,
+      projectId: 'test',
+      directory: '/test',
+      config: {},
+      db: {} as any,
+      dataDir: '/test/data',
+      kvService: mockKvService,
+      loopService: {} as any,
+      loopHandler: {} as any,
+      v2: {} as any,
+      cleanup: async () => {},
+      input: {} as any,
+      sandboxManager: null,
+    } as any
+    
+    const tools = createGraphTools(mockCtx)
+    
+    const result = await tools['graph-symbols'].execute({
+      action: 'find',
+      name: 'test',
+    } as any)
+    
+    expect(result).toContain('Graph index unavailable')
+    expect(result).toContain('Graph index incomplete')
+  })
+
+  test('graph-symbols should use generic message when not ready but no error state', async () => {
+    const mockService = {
+      ready: false,
+    } as any
+    
+    const mockKvService = {
+      get: () => null,
+    } as any
+    
+    const mockCtx = {
+      graphService: mockService,
+      logger: console as any,
+      projectId: 'test',
+      directory: '/test',
+      config: {},
+      db: {} as any,
+      dataDir: '/test/data',
+      kvService: mockKvService,
+      loopService: {} as any,
+      loopHandler: {} as any,
+      v2: {} as any,
+      cleanup: async () => {},
+      input: {} as any,
+      sandboxManager: null,
+    } as any
+    
+    const tools = createGraphTools(mockCtx)
+    
+    const result = await tools['graph-symbols'].execute({
+      action: 'find',
+      name: 'test',
+    } as any)
+    
+    expect(result).toContain('Graph not indexed yet')
+  })
+})

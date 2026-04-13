@@ -3,7 +3,7 @@
 export { createGraphService } from './service'
 export type { GraphService } from './service'
 export { GraphClient } from './client'
-export { initializeGraphDatabase, closeGraphDatabase } from './database'
+export { initializeGraphDatabase, closeGraphDatabase, ensureGraphDirectory } from './database'
 export { RpcClient, RpcServer } from './rpc'
 export { RepoMap } from './repo-map'
 export { TreeSitterBackend } from './tree-sitter'

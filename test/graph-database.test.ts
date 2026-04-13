@@ -1,7 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { initializeGraphDatabase, closeGraphDatabase } from '../src/graph/database'
-import { existsSync, rmSync, mkdirSync } from 'fs'
+import { existsSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { Database } from 'bun:sqlite'
+import { hashGraphCacheScope } from '../src/storage/graph-projects'
 
 const TEST_DATA_DIR = '/tmp/opencode-graph-db-test-' + Date.now()
 
@@ -127,6 +129,118 @@ describe('Graph database initialization', () => {
     
     const hasIndex = indexInfo.some(idx => idx.name === 'idx_semantic_summaries_symbol_id')
     expect(hasIndex).toBe(true)
+
+    closeGraphDatabase()
+  })
+})
+
+describe('Graph database corruption recovery', () => {
+  let testProjectId: string
+  let testDataDir: string
+
+  beforeEach(() => {
+    testProjectId = 'test-project-corrupt-' + Date.now()
+    testDataDir = join(TEST_DATA_DIR, Math.random().toString(36).slice(2))
+    mkdirSync(testDataDir, { recursive: true })
+  })
+
+  afterEach(() => {
+    closeGraphDatabase()
+    if (existsSync(testDataDir)) {
+      rmSync(testDataDir, { recursive: true, force: true })
+    }
+  })
+
+  test('should recover from corrupted graph database and recreate schema', () => {
+    // Initialize a fresh database with explicit cwd
+    const db = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
+    
+    // Verify initial state - tables should exist
+    const tablesBefore = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>
+    const tableNames = tablesBefore.map(t => t.name)
+    expect(tableNames).toContain('files')
+    expect(tableNames).toContain('symbols')
+    expect(tableNames).toContain('edges')
+    
+    closeGraphDatabase()
+
+    // Get the graph cache DB path using hashGraphCacheScope
+    const cacheHash = hashGraphCacheScope(testProjectId, testDataDir)
+    const graphDir = join(testDataDir, 'graph', cacheHash)
+    const dbPath = join(graphDir, 'graph.db')
+
+    // Corrupt the database file by overwriting with invalid content
+    writeFileSync(dbPath, 'CORRUPTED DATA THAT IS NOT A VALID SQLITE FILE')
+
+    // Reopen should recover and recreate
+    const recoveredDb = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
+    
+    // Verify tables exist after recovery
+    const tablesAfter = recoveredDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>
+    const tableNamesAfter = tablesAfter.map(t => t.name)
+    expect(tableNamesAfter).toContain('files')
+    expect(tableNamesAfter).toContain('symbols')
+    expect(tableNamesAfter).toContain('edges')
+
+    closeGraphDatabase()
+  })
+
+  test('should be able to insert and read data after graph DB recovery', () => {
+    // Initialize and then corrupt
+    const db = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
+    closeGraphDatabase()
+
+    // Get the graph cache DB path using hashGraphCacheScope
+    const cacheHash = hashGraphCacheScope(testProjectId, testDataDir)
+    const graphDir = join(testDataDir, 'graph', cacheHash)
+    const dbPath = join(graphDir, 'graph.db')
+
+    // Corrupt the database file
+    writeFileSync(dbPath, 'CORRUPTED DATA')
+
+    // Recover
+    const recoveredDb = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
+    
+    // Insert test data - first create a file
+    recoveredDb.run(`INSERT INTO files (path, mtime_ms, language, line_count, symbol_count, pagerank, is_barrel, indexed_at) VALUES ('/test.ts', 123, 'typescript', 10, 1, 0.5, 0, 123)`)
+    const fileId = recoveredDb.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }
+    
+    // Insert a symbol
+    recoveredDb.run(`INSERT INTO symbols (file_id, name, kind, line, end_line, is_exported) VALUES (?, 'test', 'function', 1, 5, 1)`, [fileId.id])
+    
+    // Read it back
+    const result = recoveredDb.prepare(
+      'SELECT name FROM symbols WHERE file_id = ?'
+    ).get(fileId.id) as { name: string }
+    
+    expect(result).toBeDefined()
+    expect(result.name).toBe('test')
+
+    closeGraphDatabase()
+  })
+
+  test('should handle WAL and SHM file cleanup during graph DB recovery', () => {
+    // Initialize database (creates WAL files)
+    const db = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
+    
+    // Get the graph cache DB path using hashGraphCacheScope
+    const cacheHash = hashGraphCacheScope(testProjectId, testDataDir)
+    const graphDir = join(testDataDir, 'graph', cacheHash)
+    const dbPath = join(graphDir, 'graph.db')
+    
+    // Do some writes to ensure WAL files exist
+    db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+    closeGraphDatabase()
+
+    // Corrupt the main database file
+    writeFileSync(dbPath, 'CORRUPTED DATA')
+    
+    // WAL/SHM files may or may not exist depending on checkpoint, but recovery should handle all
+    const recoveredDb = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
+    
+    // Verify recovery succeeded
+    const tables = recoveredDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>
+    expect(tables.length).toBeGreaterThan(0)
 
     closeGraphDatabase()
   })

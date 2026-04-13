@@ -21,6 +21,12 @@ import type { GraphService } from './graph'
 import { createGraphStatusCallback, writeGraphStatus, UNAVAILABLE_STATUS } from './utils/graph-status-store'
 
 
+/**
+ * Creates an OpenCode plugin instance with loop management, graph indexing, and sandboxing.
+ * 
+ * @param config - Plugin configuration including loop, graph, sandbox, and logging settings
+ * @returns OpenCode Plugin instance with hooks for tools, events, and session management
+ */
 export function createForgePlugin(config: PluginConfig): Plugin {
   return async (input: PluginInput): Promise<Hooks> => {
     const { directory, project, client } = input
@@ -137,43 +143,57 @@ export function createForgePlugin(config: PluginConfig): Plugin {
     const messagesTransformConfig = config.messagesTransform
     const sessionHooks = createSessionHooks(projectId, logger, input, compactionConfig)
 
-    let cleaned = false
-    const cleanup = async () => {
-      if (cleaned) return
-      cleaned = true
-      logger.log('Cleaning up plugin resources...')
-      
-      if (sandboxManager) {
-        const activeLoops = loopService.listActive()
-        for (const state of activeLoops) {
-          if (state.sandbox && sandboxManager) {
-            try {
-               await sandboxManager.stop(state.loopName!)
-               logger.log(`Cleanup: stopped sandbox for ${state.loopName}`)
-             } catch (err) {
-               logger.error(`Cleanup: failed to stop sandbox for ${state.loopName}`, err)
-             }
+    let cleanupPromise: Promise<void> | null = null
+
+    const cleanup = (): Promise<void> => {
+      if (cleanupPromise) {
+        return cleanupPromise
+      }
+      cleanupPromise = (async () => {
+        logger.log('Cleaning up plugin resources...')
+        
+        // Unregister process listeners before async work
+        process.removeListener('exit', handleExit)
+        process.removeListener('SIGINT', handleSigint)
+        process.removeListener('SIGTERM', handleSigterm)
+
+        if (sandboxManager) {
+          const activeLoops = loopService.listActive()
+          for (const state of activeLoops) {
+            if (state.sandbox && sandboxManager) {
+              try {
+                 await sandboxManager.stop(state.loopName!)
+                 logger.log(`Cleanup: stopped sandbox for ${state.loopName}`)
+               } catch (err) {
+                 logger.error(`Cleanup: failed to stop sandbox for ${state.loopName}`, err)
+               }
+            }
           }
         }
-      }
 
-      loopHandler.terminateAll()
-      logger.log('Loop: all active loops terminated')
-      
-      loopHandler.clearAllRetryTimeouts()
-      
-      if (graphService) {
-        await graphService.close()
-        logger.log('Graph service closed')
-      }
-      
-      closeDatabase(db)
-      logger.log('Plugin cleanup complete')
+        loopHandler.terminateAll()
+        logger.log('Loop: all active loops terminated')
+        
+        loopHandler.clearAllRetryTimeouts()
+        
+        if (graphService) {
+          await graphService.close()
+          logger.log('Graph service closed')
+        }
+        
+        closeDatabase(db)
+        logger.log('Plugin cleanup complete')
+      })()
+      return cleanupPromise
     }
 
-    process.once('exit', cleanup)
-    process.once('SIGINT', cleanup)
-    process.once('SIGTERM', cleanup)
+    const handleExit = cleanup
+    const handleSigint = cleanup
+    const handleSigterm = cleanup
+
+    process.once('exit', handleExit)
+    process.once('SIGINT', handleSigint)
+    process.once('SIGTERM', handleSigterm)
 
     const getCleanup = cleanup
 
@@ -230,7 +250,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
       event: async (input) => {
         const eventInput = input as { event: { type: string; properties?: Record<string, unknown> } }
         if (eventInput.event?.type === 'server.instance.disposed') {
-          cleanup()
+          await cleanup()
           return
         }
         await loopHandler.onEvent(eventInput)
@@ -307,7 +327,7 @@ You are in READ-ONLY mode for file system operations. You MUST NOT directly edit
 However, you CAN and SHOULD:
 - Use \`plan-write\` to write the plan
 - Use \`plan-edit\` to make targeted updates to the plan
-- Use \`plan-read\` to review the plan
+- Use \`plan-read\` to review the plan, including by explicit \`loop_name\` when needed
 - Use \`plan-execute\` or \`loop\` ONLY AFTER:
   1. The plan has been written via \`plan-write\`
   2. The user explicitly approves via the question tool

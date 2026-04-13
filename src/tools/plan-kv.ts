@@ -64,14 +64,15 @@ export function createPlanTools(ctx: ToolContext): Record<string, ReturnType<typ
     }),
 
     'plan-read': tool({
-      description: 'Read the plan for the current session. Supports pagination with offset/limit and pattern search.',
+      description: 'Read the plan for the current session or a specified loop name. Supports pagination with offset/limit and pattern search.',
       args: {
         offset: z.number().optional().describe('Line number to start from (1-indexed)'),
         limit: z.number().optional().describe('Maximum number of lines to return'),
         pattern: z.string().optional().describe('Regex pattern to search for in plan content'),
+        loop_name: z.string().optional().describe('Optional loop name to read plan:{loop_name} directly instead of resolving from the current session'),
       },
       execute: async (args, context) => {
-        const key = resolvePlanKey(context.sessionID)
+        const key = args.loop_name ? `plan:${args.loop_name}` : resolvePlanKey(context.sessionID)
         const value = kvService.get<string>(projectId, key)
         
         if (value === null) {

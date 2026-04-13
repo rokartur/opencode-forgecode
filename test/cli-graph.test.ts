@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { hashGraphCacheScope } from '../src/storage/graph-projects'
 
 function createTestKvDb(tempDir: string): Database {
   const dbPath = join(tempDir, 'graph.db')
@@ -85,6 +86,63 @@ describe('CLI Graph', () => {
       action: 'scan',
       dbPath: join(tempDir, 'graph.db'),
       resolvedProjectId: 'test-project',
+      dir: projectDir,
+    })
+
+    const output = outputLines.join('\n')
+    expect(output).toContain('Graph scan complete.')
+    expect(output).toContain('Files:')
+  })
+
+  test('scan should succeed even when shared database is corrupted', async () => {
+    const dbPath = join(tempDir, 'graph.db')
+    
+    // Create and corrupt the database
+    const db = new Database(dbPath)
+    db.close()
+    writeFileSync(dbPath, 'CORRUPTED DATA')
+
+    writeFileSync(join(projectDir, 'index.ts'), 'export const x = 1')
+
+    const outputLines: string[] = []
+    console.log = (msg?: unknown) => outputLines.push(String(msg ?? ''))
+
+    const { run } = await import('../src/cli/commands/graph')
+    await run({
+      action: 'scan',
+      dbPath: dbPath,
+      resolvedProjectId: 'test-project',
+      dir: projectDir,
+    })
+
+    const output = outputLines.join('\n')
+    expect(output).toContain('Graph scan complete.')
+  })
+
+  test('scan should succeed when graph cache DB is corrupted', async () => {
+    const projectId = 'test-project-' + Date.now()
+    const cacheHash = hashGraphCacheScope(projectId, projectDir)
+    const graphCacheDir = join(tempDir, 'graph', cacheHash)
+    const graphCacheDbPath = join(graphCacheDir, 'graph.db')
+    
+    // Create the graph cache directory structure
+    mkdirSync(graphCacheDir, { recursive: true })
+    
+    // Create and immediately corrupt the graph cache database
+    const graphDb = new Database(graphCacheDbPath)
+    graphDb.close()
+    writeFileSync(graphCacheDbPath, 'CORRUPTED GRAPH DATA THAT IS MALFORMED')
+
+    writeFileSync(join(projectDir, 'index.ts'), 'export const y = 2')
+
+    const outputLines: string[] = []
+    console.log = (msg?: unknown) => outputLines.push(String(msg ?? ''))
+
+    const { run } = await import('../src/cli/commands/graph')
+    await run({
+      action: 'scan',
+      dbPath: join(tempDir, 'graph.db'),
+      resolvedProjectId: projectId,
       dir: projectDir,
     })
 

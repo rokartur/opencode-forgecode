@@ -1,3 +1,7 @@
+**opencode-forge**
+
+***
+
 <h1 align="center">OpenCode Forge</h1>
 
 <p align="center">
@@ -49,7 +53,6 @@ The auditor agent is a read-only subagent (`temperature: 0.0`) that can read the
 **Tool restrictions:** The auditor cannot use `plan-write`, `plan-edit`, `plan-execute`, or `loop` tools to prevent interference with active workflows.
 
 The architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with message-level enforcement via the `experimental.chat.messages.transform` hook. Plans are built incrementally in the KV store during the planning session. After user approval via the question tool, execution is dispatched programmatically — no additional LLM calls are needed. The user can view and edit the cached plan from the sidebar or command palette before or during execution. 
-
 
 ## Tools
 
@@ -621,7 +624,6 @@ The `container/Dockerfile` is included in the project. To add project-specific t
 docker build -t oc-forge-sandbox:latest container/
 ```
 
-
 ## Development
 
 ```bash
@@ -630,6 +632,9 @@ pnpm test       # Run tests
 pnpm typecheck  # Type check without emitting
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](_media/CONTRIBUTING.md) for development setup, testing, code style, and Git workflow guidelines.
 
 ## License
 

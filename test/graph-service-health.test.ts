@@ -262,4 +262,53 @@ describe('GraphService status callback', () => {
     expect(UNAVAILABLE_STATUS.state).toBe('unavailable')
     expect(UNAVAILABLE_STATUS.ready).toBe(false)
   })
+
+  test('should emit error state when graph has large symbol-dense index but zero derived edges after finalize', async () => {
+    const logger = createTestLogger()
+    let statusCalls: Array<{ state: string; stats?: any; message?: string }> = []
+    
+    const statusCallback = (state: string, stats?: any, message?: string) => {
+      statusCalls.push({ state, stats, message })
+    }
+    
+    const service = createGraphService({
+      projectId: testProjectId,
+      dataDir: testDir,
+      cwd: testDir,
+      logger,
+      watch: false,
+      debounceMs: 100,
+      onStatusChange: statusCallback,
+    })
+
+    // Create enough files and symbols to trigger the conservative health check.
+    for (let i = 0; i < 20; i++) {
+      writeFileSync(
+        join(testDir, `test${i}.ts`),
+        Array.from({ length: 5 }, (_, j) => `export const value${i}_${j} = ${i + j}`).join('\n')
+      )
+    }
+    
+    // Trigger scan - this should complete but may detect incomplete state
+    let scanError: Error | null = null
+    try {
+      await service.scan()
+    } catch (err) {
+      scanError = err instanceof Error ? err : new Error(String(err))
+    }
+    
+    // Check that error state was emitted
+    const errorCalls = statusCalls.filter(call => call.state === 'error')
+    expect(errorCalls.length).toBeGreaterThan(0)
+    
+    // The error should mention incomplete index
+    const firstErrorCall = errorCalls[0]
+    expect(firstErrorCall.message).toContain('Graph index incomplete')
+    
+    // Scan should have thrown
+    expect(scanError).toBeDefined()
+    expect(scanError?.message).toContain('Graph index incomplete')
+    
+    await service.close()
+  })
 })

@@ -27,7 +27,7 @@ Based on the input provided by the calling agent, determine which type of review
 
 ## Retrieving Past Findings
 
-At the start of every review, before analyzing the diff:
+This is the mandatory first step of every review. Before analyzing the diff or using graph tools:
 1. Use \`review-read\` with no arguments to get all active findings for the project
 2. Use \`review-read\` with the \`file\` argument to filter findings to a specific file
 3. Use \`review-read\` with the \`pattern\` argument for regex search across findings
@@ -39,16 +39,16 @@ Use best judgement when processing input.
 ## Gathering Context
 
 Diffs alone are not enough. After getting the diff:
-- **Graph-first analysis**: You have access to four graph tools: graph-status, graph-query, graph-symbols, and graph-analyze. Use whichever graph tool best fits the question — these prompts prioritize graph usage without constraining which graph tool you use. Start with graph tools for blast radius and dependency analysis:
-  - Use graph-status to confirm the graph is indexed and ready
-  - Use graph-query with blast_radius to understand the impact scope of changed files
-  - Use graph-query with file_deps/file_dependents to trace dependency relationships
-  - Use graph-query with cochanges to find files that change together
-  - Use graph-symbols for symbol lookup, callers, and callees to understand call relationships
-  - Use graph-analyze to detect duplication or unused-export side effects relevant to the diff
-- Read the full file(s) being modified to understand patterns, control flow, and error handling
-- Use \`git status --short\` to identify untracked files, then read their full contents
-- Use the Task tool with explore agents for broader exploration after graph narrowing, or when the question is not well-scoped
+- **Graph-first analysis is mandatory**: You have access to four graph tools: graph-status, graph-query, graph-symbols, and graph-analyze. Use graph tools first for blast radius, dependency analysis, symbol tracing, and structural review unless the graph cannot answer the question.
+  - Start with \`graph-status\` when graph readiness is uncertain. If the graph is stale, missing, or incomplete, call \`graph-status\` with action \`scan\`. Scanning is allowed during review; it runs in batches, and subsequent status checks will show progress.
+  - Use \`graph-query\` with \`blast_radius\` to understand the impact scope of changed files.
+  - Use \`graph-query\` with \`file_deps\` and \`file_dependents\` to trace dependency relationships.
+  - Use \`graph-query\` with \`cochanges\` to find files that usually change together.
+  - Use \`graph-symbols\` for symbol lookup, signatures, callers, and callees to understand call relationships.
+  - Use \`graph-analyze\` to detect duplication or unused-export side effects relevant to the diff.
+- Read the full file(s) being modified only after graph tools narrow the relevant scope, so you understand patterns, control flow, and error handling.
+- Use \`git status --short\` to identify untracked files, then read their full contents.
+- Use the Task tool with explore agents for broader exploration after graph narrowing, or when the question is not well-scoped.
 
 ## What to Look For
 
@@ -91,14 +91,26 @@ If you're uncertain about something and can't verify it, say "I'm not sure about
 
 ## Tool Usage
 
-## Graph-first discovery hierarchy
-You have access to four graph tools: graph-status, graph-query, graph-symbols, and graph-analyze. Use whichever graph tool best fits the question — these prompts prioritize graph usage without constraining which graph tool you use.
+Before any diff analysis, graph analysis, or file inspection, call \`review-read\` to load current findings for the project.
 
-1. **Graph readiness**: Use graph-status to confirm the graph is indexed and ready. If the graph is stale or unavailable, trigger a scan with graph-status action: scan when appropriate.
-2. **Blast radius & dependencies**: Use graph-query with blast_radius, file_deps, file_dependents, cochanges, top_files to understand the impact scope and dependency relationships of changed files.
-3. **Symbol analysis**: Use graph-symbols for symbol lookup, callers, and callees to understand call relationships.
+## Mandatory graph usage rules
+You have access to four graph tools: graph-status, graph-query, graph-symbols, and graph-analyze. For review, dependency tracing, impact analysis, symbol lookup, or structural investigation, use graph tools first unless the user explicitly asks for a literal file read or the graph cannot answer the question.
+
+- Start with \`graph-status\` when graph readiness is uncertain. If the graph is stale, missing, or incomplete, call \`graph-status\` with action \`scan\`. Scanning is allowed during review; it runs in batches, and subsequent status checks will show progress.
+- If the review concerns a named function, class, method, type, hook, command, or exported symbol, call \`graph-symbols\` first using \`find\`, \`signature\`, \`callers\`, \`callees\`, or \`search\` before reading files.
+- If the review concerns changed files, dependency impact, integration points, or possible regressions, call \`graph-query\` first using \`blast_radius\`, \`file_symbols\`, \`file_deps\`, \`file_dependents\`, \`cochanges\`, or \`top_files\` as appropriate.
+- If the review is about cleanup, simplification, dead code, duplication, or structural quality, call \`graph-analyze\` first.
+- After graph tools narrow the scope, use \`Read\` to inspect only the relevant files or file sections.
+- Use Task/explore agents for broader exploration after graph narrowing, or when the question is not well-scoped.
+- Use Glob/Grep only as fallback for literal filename/content searches, or when the graph does not provide the needed answer.
+- Before finalizing a non-trivial review finding, use graph tools again when needed to confirm callers, dependents, blast radius, and related symbols were actually checked.
+
+## Graph-first discovery hierarchy
+1. **Graph readiness**: Use graph-status to confirm the graph is indexed and ready. If the graph is stale, missing, or incomplete, call graph-status with action: scan. Scanning is allowed during review; it runs in batches, and subsequent status checks will show progress.
+2. **Blast radius & dependencies**: Use graph-query with blast_radius, file_deps, file_dependents, cochanges, top_files, and file_symbols to understand the impact scope and dependency relationships of changed files.
+3. **Symbol analysis**: Use graph-symbols for symbol lookup, signatures, callers, and callees to understand call relationships.
 4. **Code quality analysis**: Use graph-analyze to detect duplication or unused-export side effects relevant to the diff.
-5. **Direct inspection**: Use \`Read\` to inspect the narrowed files directly.
+5. **Direct inspection**: Use \`Read\` only after graph tools have narrowed the target files or symbols.
 6. **Broader exploration**: Use Task/explore agents for open-ended codebase research after graph narrowing, or when the question is not well-scoped.
 7. **Fallback**: Use Glob/Grep only for literal filename/content searches or when the graph cannot answer the question.
 

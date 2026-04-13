@@ -32,41 +32,130 @@ function deleteGraphDatabaseFiles(dbPath: string): void {
   } catch {}
 }
 
+/**
+ * Opens a managed graph database with integrity verification.
+ * If integrity check fails or opening throws a corruption error, deletes the corrupted DB files
+ * and recreates a fresh database.
+ * 
+ * @param dbPath - Path to the database file
+ * @returns A fresh or recovered Database instance
+ */
 export function openGraphDatabase(dbPath: string): Database {
-  const db = new Database(dbPath)
+  let db: Database | null = null
+  let needsBootstrap = false
 
-  db.run('PRAGMA journal_mode=WAL')
-  db.run('PRAGMA busy_timeout=5000')
-  db.run('PRAGMA synchronous=NORMAL')
-  db.run('PRAGMA foreign_keys=ON')
+  // Clean up orphaned SHM files when the WAL file is completely missing.
+  // This state indicates the previous process crashed without checkpointing, and
+  // opening with a stale SHM but no WAL can trigger "malformed" errors.
+  // Note: empty WAL + SHM is normal after a TRUNCATE checkpoint — don't touch that.
+  try {
+    const shmPath = dbPath + '-shm'
+    const walPath = dbPath + '-wal'
+    if (existsSync(shmPath) && !existsSync(walPath)) {
+      console.debug(`Removing orphaned SHM file for ${dbPath}`)
+      try { unlinkSync(shmPath) } catch {}
+    }
+  } catch {}
 
-  const integrityResult = db.prepare('PRAGMA integrity_check').get() as { integrity_check: string }
-  if (integrityResult.integrity_check !== 'ok') {
-    db.close()
-    console.error(`Graph database corruption detected at ${dbPath}: ${integrityResult.integrity_check}`)
-    deleteGraphDatabaseFiles(dbPath)
-    return openGraphDatabase(dbPath)
+  try {
+    db = new Database(dbPath)
+    db.run('PRAGMA journal_mode=WAL')
+    db.run('PRAGMA busy_timeout=5000')
+    db.run('PRAGMA synchronous=NORMAL')
+    db.run('PRAGMA foreign_keys=ON')
+
+    // Run integrity check
+    const integrityResult = db.prepare('PRAGMA integrity_check').get() as { integrity_check: string }
+    if (integrityResult.integrity_check !== 'ok') {
+      db.close()
+      console.error(`Graph database corruption detected at ${dbPath}: ${integrityResult.integrity_check}`)
+      deleteGraphDatabaseFiles(dbPath)
+      needsBootstrap = true
+      db = null
+    }
+
+    // Validate with a real data query — PRAGMA integrity_check can miss WAL-level corruption
+    if (db) {
+      try {
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>
+        // If tables exist, read from one to exercise data pages
+        if (tables.some(t => t.name === 'files')) {
+          db.prepare('SELECT COUNT(*) as c FROM files').get()
+        }
+      } catch (validateErr) {
+        db.close()
+        console.error(`Graph database validation failed at ${dbPath}: ${validateErr instanceof Error ? validateErr.message : String(validateErr)}`)
+        deleteGraphDatabaseFiles(dbPath)
+        needsBootstrap = true
+        db = null
+      }
+    }
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    console.error(`Graph database open failed at ${dbPath}: ${errorMsg}`)
+    
+    // Close db handle if it was opened before attempting deletion
+    if (db) {
+      try {
+        db.close()
+      } catch {}
+      db = null
+    }
+    
+    // Only delete database files if the error indicates corruption or invalid format
+    // Don't delete for transient issues unrelated to corruption
+    const isCorruptionError = 
+      errorMsg.includes('database disk image is malformed') ||
+      errorMsg.includes('corrupt') ||
+      errorMsg.includes('SQLITE_CORRUPT') ||
+      errorMsg.includes('file is not a database')
+    
+    if (isCorruptionError) {
+      deleteGraphDatabaseFiles(dbPath)
+      needsBootstrap = true
+    }
+    // For transient errors, re-throw to let the caller handle
+    if (!isCorruptionError) {
+      throw err
+    }
   }
 
+  if (needsBootstrap || db === null) {
+    return createFreshGraphDatabase(dbPath)
+  }
+
+  // Bootstrap schema on first open (idempotent - uses IF NOT EXISTS)
   createTables(db)
   return db
 }
 
 /**
- * Initialize the graph database with the full schema
- * Database location: <dataDir>/graph/<projectId::cwd-hash>/graph.db
+ * Creates a fresh graph database and runs schema initialization.
  */
-export function initializeGraphDatabase(projectId: string, dataDir: string, cwd?: string): Database {
-  const projectIdHash = cwd 
+function createFreshGraphDatabase(dbPath: string): Database {
+  const freshDb = new Database(dbPath)
+  freshDb.run('PRAGMA journal_mode=WAL')
+  freshDb.run('PRAGMA busy_timeout=5000')
+  freshDb.run('PRAGMA synchronous=NORMAL')
+  freshDb.run('PRAGMA foreign_keys=ON')
+  createTables(freshDb)
+  return freshDb
+}
+
+/**
+ * Ensures the graph directory and metadata file exist, returning the database path.
+ * Does NOT open a database connection — the worker thread is the sole DB owner.
+ */
+export function ensureGraphDirectory(projectId: string, dataDir: string, cwd?: string): string {
+  const projectIdHash = cwd
     ? hashGraphCacheScope(projectId, cwd)
     : hashProjectId(projectId)
   const graphDir = join(dataDir, 'graph', projectIdHash)
-  
+
   if (!existsSync(graphDir)) {
     mkdirSync(graphDir, { recursive: true })
   }
 
-  // Write metadata file to enable cache identity resolution
   const metadataPath = join(graphDir, GRAPH_METADATA_FILE)
   if (!existsSync(metadataPath)) {
     const metadata: GraphCacheMetadata = {
@@ -77,7 +166,15 @@ export function initializeGraphDatabase(projectId: string, dataDir: string, cwd?
     writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
   }
 
-  const dbPath = join(graphDir, 'graph.db')
+  return join(graphDir, 'graph.db')
+}
+
+/**
+ * Initialize the graph database with the full schema
+ * Database location: <dataDir>/graph/<projectId::cwd-hash>/graph.db
+ */
+export function initializeGraphDatabase(projectId: string, dataDir: string, cwd?: string): Database {
+  const dbPath = ensureGraphDirectory(projectId, dataDir, cwd)
   const db = openGraphDatabase(dbPath)
 
   // Track instance for later cleanup
@@ -113,9 +210,11 @@ export function readGraphCacheMetadata(graphDir: string): GraphCacheMetadata | n
 export function closeGraphDatabase(): void {
   for (const [path, db] of databaseInstances.entries()) {
     try {
+      db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+    } catch {}
+    try {
       db.close()
     } catch (err) {
-      // Database may already be closed
       console.debug(`Graph database close skipped for ${path}`, err)
     }
     databaseInstances.delete(path)
@@ -311,32 +410,40 @@ function createTables(db: Database): void {
   db.run(`CREATE INDEX IF NOT EXISTS idx_token_fragments_hash ON token_fragments(hash)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_token_fragments_file_id ON token_fragments(file_id)`)
 
-  // FTS5 virtual table for symbol search
+  // FTS5 virtual table for symbol search (standalone — not external content, since
+  // 'path' is derived from the files table via JOIN, not stored in symbols directly)
+  // Migration: drop old external-content FTS table that references non-existent symbols.path
+  const ftsInfo = db.prepare("SELECT sql FROM sqlite_master WHERE name='symbols_fts'").get() as { sql: string } | undefined
+  if (ftsInfo?.sql?.includes("content='symbols'")) {
+    db.run('DROP TABLE IF EXISTS symbols_fts')
+  }
   db.run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
       name,
       path,
-      kind,
-      content='symbols',
-      content_rowid='id'
+      kind
     )
   `)
 
-  // Triggers to keep FTS in sync
+  // Triggers to keep FTS in sync (standalone FTS table — use regular INSERT/DELETE)
+  // Migration: drop old triggers that used external-content delete syntax
+  db.run('DROP TRIGGER IF EXISTS symbols_ai')
+  db.run('DROP TRIGGER IF EXISTS symbols_ad')
+  db.run('DROP TRIGGER IF EXISTS symbols_au')
   db.run(`
-    CREATE TRIGGER IF NOT EXISTS symbols_ai AFTER INSERT ON symbols BEGIN
+    CREATE TRIGGER symbols_ai AFTER INSERT ON symbols BEGIN
       INSERT INTO symbols_fts(rowid, name, path, kind)
       VALUES (new.id, new.name, (SELECT path FROM files WHERE id = new.file_id), new.kind);
     END
   `)
   db.run(`
-    CREATE TRIGGER IF NOT EXISTS symbols_ad AFTER DELETE ON symbols BEGIN
-      INSERT INTO symbols_fts(symbols_fts, rowid, name, path, kind) VALUES('delete', old.id, old.name, '', old.kind);
+    CREATE TRIGGER symbols_ad AFTER DELETE ON symbols BEGIN
+      DELETE FROM symbols_fts WHERE rowid = old.id;
     END
   `)
   db.run(`
-    CREATE TRIGGER IF NOT EXISTS symbols_au AFTER UPDATE ON symbols BEGIN
-      INSERT INTO symbols_fts(symbols_fts, rowid, name, path, kind) VALUES('delete', old.id, old.name, '', old.kind);
+    CREATE TRIGGER symbols_au AFTER UPDATE ON symbols BEGIN
+      DELETE FROM symbols_fts WHERE rowid = old.id;
       INSERT INTO symbols_fts(rowid, name, path, kind)
       VALUES (new.id, new.name, (SELECT path FROM files WHERE id = new.file_id), new.kind);
     END

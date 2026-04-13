@@ -79,8 +79,10 @@ describe('createForgePlugin', () => {
 
     expect(cacheHash1).not.toBe(cacheHash2)
 
-    if (hooks1.getCleanup) await hooks1.getCleanup()
-    if (hooks2.getCleanup) await hooks2.getCleanup()
+    const typedHooks1 = hooks1 as { getCleanup?: () => Promise<void> }
+    const typedHooks2 = hooks2 as { getCleanup?: () => Promise<void> }
+    if (typedHooks1.getCleanup) await typedHooks1.getCleanup()
+    if (typedHooks2.getCleanup) await typedHooks2.getCleanup()
   })
 
   test('REGRESSION: worktree loop startup uses worktree directory as session and graph root', async () => {
@@ -272,6 +274,83 @@ describe('createForgePlugin', () => {
     currentHooks = hooks as { getCleanup?: () => Promise<void> }
 
     expect(hooks.tool).toBeDefined()
+  })
+
+  test('REGRESSION: server.instance.disposed event awaits cleanup and removes process listeners', async () => {
+    const config: PluginConfig = {
+      dataDir: `${testDir}/.opencode/memory`,
+      graph: { enabled: true, autoScan: false },
+    }
+
+    const plugin = createForgePlugin(config)
+
+    const mockInput = {
+      directory: testDir,
+      worktree: testDir,
+      client: {} as never,
+      project: { id: TEST_PROJECT_ID } as never,
+      serverUrl: new URL('http://localhost:5551'),
+      $: {} as never,
+    }
+
+    const baselineSigintListeners = process.listenerCount('SIGINT')
+    const baselineSigtermListeners = process.listenerCount('SIGTERM')
+    const baselineExitListeners = process.listenerCount('exit')
+
+    const hooks = await plugin(mockInput)
+    const typedHooks = hooks as { getCleanup?: () => Promise<void>; event: (input: unknown) => Promise<void> }
+    currentHooks = typedHooks
+
+    expect(process.listenerCount('SIGINT')).toBeGreaterThan(baselineSigintListeners)
+    expect(process.listenerCount('SIGTERM')).toBeGreaterThan(baselineSigtermListeners)
+    expect(process.listenerCount('exit')).toBeGreaterThan(baselineExitListeners)
+
+    await typedHooks.event({ event: { type: 'server.instance.disposed', properties: {} } } as never)
+
+    expect(process.listenerCount('SIGINT')).toBe(baselineSigintListeners)
+    expect(process.listenerCount('SIGTERM')).toBe(baselineSigtermListeners)
+    expect(process.listenerCount('exit')).toBe(baselineExitListeners)
+
+    const cleanupFn = typedHooks.getCleanup
+    if (cleanupFn) {
+      const secondCleanupCall = cleanupFn()
+      await expect(secondCleanupCall).resolves.toBeUndefined()
+    }
+  })
+
+  test('REGRESSION: repeated plugin instances after disposal maintain stable cleanup', async () => {
+    const config: PluginConfig = {
+      dataDir: `${testDir}/.opencode/memory`,
+      graph: { enabled: true, autoScan: false },
+    }
+
+    const baselineSigintListeners = process.listenerCount('SIGINT')
+
+    const plugin = createForgePlugin(config)
+
+    const mockInput = {
+      directory: testDir,
+      worktree: testDir,
+      client: {} as never,
+      project: { id: TEST_PROJECT_ID } as never,
+      serverUrl: new URL('http://localhost:5551'),
+      $: {} as never,
+    }
+
+    const hooks1 = await plugin(mockInput)
+    const typedHooks1 = hooks1 as { getCleanup?: () => Promise<void>; event: (input: unknown) => Promise<void> }
+    await typedHooks1.event({ event: { type: 'server.instance.disposed', properties: {} } } as never)
+
+    const hooks2 = await plugin(mockInput)
+    const typedHooks2 = hooks2 as { getCleanup?: () => Promise<void> }
+    currentHooks = typedHooks2
+
+    const cleanupFn2 = typedHooks2.getCleanup
+    if (cleanupFn2) {
+      await cleanupFn2()
+    }
+
+    expect(process.listenerCount('SIGINT')).toBe(baselineSigintListeners)
   })
 
 })

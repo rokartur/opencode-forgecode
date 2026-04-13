@@ -4,22 +4,9 @@ import { homedir, platform } from 'os'
 import { join, basename } from 'path'
 import { execSync } from 'child_process'
 import { createInterface } from 'readline'
+import { openForgeDatabase } from '../storage/database'
 
-export type MemoryScope = 'convention' | 'decision' | 'context'
-
-export interface PluginRecord {
-  id: number
-  projectId: string
-  scope: MemoryScope
-  content: string
-  filePath: string | null
-  accessCount: number
-  lastAccessedAt: number | null
-  createdAt: number
-  updatedAt: number
-}
-
-export function resolveDefaultDbPath(): string {
+function resolveDefaultDbPath(): string {
   const localForgePath = join(process.cwd(), '.opencode', 'state', 'opencode', 'forge', 'graph.db')
   if (existsSync(localForgePath)) {
     return localForgePath
@@ -62,18 +49,7 @@ export function getGitProjectId(dir?: string): string | null {
   }
 }
 
-export function groupBy<T>(arr: T[], keyFn: (item: T) => string): Record<string, T[]> {
-  return arr.reduce((acc, item) => {
-    const key = keyFn(item)
-    if (!acc[key]) acc[key] = []
-    acc[key].push(item)
-    return acc
-  }, {} as Record<string, T[]>)
-}
 
-export function capitalize(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1)
-}
 
 export function openDatabase(dbPath?: string): Database {
   const resolvedPath = dbPath || resolveDefaultDbPath()
@@ -83,12 +59,10 @@ export function openDatabase(dbPath?: string): Database {
     process.exit(1)
   }
 
-  return new Database(resolvedPath)
+  return openForgeDatabase(resolvedPath)
 }
 
-export function formatDate(timestamp: number): string {
-  return new Date(timestamp).toISOString().split('T')[0]
-}
+
 
 export function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str
@@ -164,18 +138,14 @@ export function resolveProjectIdByName(name: string): string | null {
   return null
 }
 
-export function displayProjectId(id: string, nameMap: Map<string, string>): string {
-  return nameMap.get(id) || id
-}
-
-export interface GlobalOptions {
+interface GlobalOptions {
   dbPath?: string
   projectId?: string
   dir?: string
   help?: boolean
 }
 
-export interface ParsedGlobalOptions {
+interface ParsedGlobalOptions {
   globalOpts: GlobalOptions
   remainingArgs: string[]
 }

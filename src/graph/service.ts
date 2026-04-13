@@ -1,6 +1,5 @@
 import { GraphClient } from './client'
-import { initializeGraphDatabase, closeGraphDatabase } from './database'
-import { hashGraphCacheScope } from '../storage/graph-projects'
+import { ensureGraphDirectory } from './database'
 import { join, relative } from 'path'
 import { watch } from 'fs'
 import type { Logger } from '../types'
@@ -24,31 +23,119 @@ import { IGNORED_DIRS, IGNORED_EXTS } from './utils'
 import type { GraphState, GraphStatsPayload } from '../utils/graph-status-store'
 
 export interface GraphService {
+  /** Whether the graph service is fully initialized and ready to respond to queries. */
   readonly ready: boolean
+  /**
+   * Performs a full scan of the codebase, indexing all files and building the graph.
+   * Emits progress status updates during indexing.
+   */
   scan(): Promise<void>
+  /**
+   * Closes the graph service, stopping watchers and releasing resources.
+   */
   close(): Promise<void>
+  /**
+   * Returns statistics about the indexed codebase.
+   */
   getStats(): Promise<GraphStats>
+  /**
+   * Returns the top N files by PageRank importance.
+   * @param limit - Maximum number of files to return. Defaults to 20.
+   */
   getTopFiles(limit?: number): Promise<TopFileResult[]>
+  /**
+   * Returns files that depend on the specified file.
+   * @param relPath - Relative path to the file.
+   */
   getFileDependents(relPath: string): Promise<FileDepResult[]>
+  /**
+   * Returns files that the specified file depends on.
+   * @param relPath - Relative path to the file.
+   */
   getFileDependencies(relPath: string): Promise<FileDepResult[]>
+  /**
+   * Returns files that frequently change together with the specified file.
+   * @param relPath - Relative path to the file.
+   */
   getFileCoChanges(relPath: string): Promise<FileCoChangeResult[]>
+  /**
+   * Returns the blast radius (number of affected files) if this file were changed.
+   * @param relPath - Relative path to the file.
+   */
   getFileBlastRadius(relPath: string): Promise<number>
+  /**
+   * Returns all symbols defined in the specified file.
+   * @param relPath - Relative path to the file.
+   */
   getFileSymbols(relPath: string): Promise<FileSymbolResult[]>
+  /**
+   * Searches for symbols by exact name match.
+   * @param name - Symbol name to search for.
+   * @param limit - Maximum number of results. Defaults to 50.
+   */
   findSymbols(name: string, limit?: number): Promise<SymbolSearchResult[]>
+  /**
+   * Searches for symbols using full-text search.
+   * @param query - Search query string.
+   * @param limit - Maximum number of results. Defaults to 20.
+   */
   searchSymbolsFts(query: string, limit?: number): Promise<SymbolSearchResult[]>
+  /**
+   * Returns the signature of a symbol at the given location.
+   * @param path - Absolute path to the file.
+   * @param line - Line number of the symbol.
+   */
   getSymbolSignature(path: string, line: number): Promise<SymbolSignatureResult | null>
+  /**
+   * Returns all call sites that call the symbol at the given location.
+   * @param path - Absolute path to the file.
+   * @param line - Line number of the symbol definition.
+   */
   getCallers(path: string, line: number): Promise<CallerResult[]>
+  /**
+   * Returns all symbols called by the symbol at the given location.
+   * @param path - Absolute path to the file.
+   * @param line - Line number of the symbol definition.
+   */
   getCallees(path: string, line: number): Promise<CalleeResult[]>
+  /**
+   * Returns exported symbols that appear unused.
+   * @param limit - Maximum number of results. Defaults to 50.
+   */
   getUnusedExports(limit?: number): Promise<UnusedExportResult[]>
+  /**
+   * Returns groups of files with duplicate code structures.
+   * @param limit - Maximum number of result groups. Defaults to 20.
+   */
   getDuplicateStructures(limit?: number): Promise<DuplicateStructureResult[]>
+  /**
+   * Returns pairs of similar but not identical code structures.
+   * @param threshold - Similarity threshold (0-1). Defaults to 0.8.
+   * @param limit - Maximum number of results. Defaults to 50.
+   */
   getNearDuplicates(threshold?: number, limit?: number): Promise<NearDuplicateResult[]>
+  /**
+   * Returns external packages imported by the codebase.
+   * @param limit - Maximum number of results. Defaults to 50.
+   */
   getExternalPackages(limit?: number): Promise<ExternalPackageResult[]>
+  /**
+   * Renders a text visualization of the code graph.
+   * @param opts - Rendering options.
+   */
   render(opts?: { maxFiles?: number; maxSymbols?: number }): Promise<{ content: string; paths: string[] }>
+  /**
+   * Notifies the service that a file has changed, triggering re-indexing.
+   * @param absPath - Absolute path to the changed file.
+   */
   onFileChanged(absPath: string): void
 }
 
 export type GraphStatusCallback = (state: GraphState, stats?: GraphStatsPayload, message?: string) => void
 
+/**
+ * Configuration for creating a graph service instance.
+ */
 interface GraphServiceConfig {
   projectId: string
   dataDir: string
@@ -67,11 +154,36 @@ interface PendingChange {
 
 const DEFAULT_DEBOUNCE_MS = 500
 
+/**
+ * Evaluates graph health based on stats to detect obviously incomplete indexes.
+ * Returns a description of the health issue if found, or null if healthy.
+ * 
+ * Conservative heuristic: only treat the graph as incomplete when derived state is
+ * missing for a large, symbol-dense index. Small or dependency-free repos can
+ * validly have zero edges.
+ */
+function evaluateGraphHealth(stats: { files: number; symbols: number; edges: number; calls: number }): string | null {
+  // Only flag as incomplete for large, symbol-dense indexes with zero edges.
+  // Smaller repos or those with standalone files can validly have no dependencies.
+  if (stats.files >= 50 && stats.symbols >= 500 && stats.edges === 0 && stats.calls === 0) {
+    return `${stats.files} files and ${stats.symbols} symbols indexed but 0 dependency edges or call edges generated`
+  }
+  
+  return null
+}
+
+/**
+ * Creates a graph service instance for code indexing and querying.
+ * 
+ * @param config - Service configuration including project ID, data directory, and callbacks
+ * @returns A GraphService instance for code graph operations
+ */
 export function createGraphService(config: GraphServiceConfig): GraphService {
   const { projectId, dataDir, cwd, logger, watch: watchEnabled, debounceMs, onStatusChange } = config
   const client = new GraphClient()
   let dbPath: string | null = null
   let initialized = false
+  let closing = false
   let watcher: ReturnType<typeof watch> | null = null
   let flushTimer: ReturnType<typeof setTimeout> | null = null
   const pendingQueue = new Map<string, PendingChange>()
@@ -124,8 +236,8 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
   let workerHealthy = true
 
   async function flushQueue(): Promise<void> {
-    if (isFlushing || pendingQueue.size === 0 || !workerHealthy) {
-      if (!workerHealthy && pendingQueue.size > 0) {
+    if (closing || isFlushing || pendingQueue.size === 0 || !workerHealthy) {
+      if (!closing && !workerHealthy && pendingQueue.size > 0) {
         logger.debug('Graph flush skipped - worker unhealthy')
         pendingQueue.clear()
       }
@@ -155,12 +267,26 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
 
       if (workerHealthy && initialized) {
         const stats = await client.getStats()
-        emitStatus('ready', {
-          files: stats.files,
-          symbols: stats.symbols,
-          edges: stats.edges,
-          calls: stats.calls,
-        })
+        
+        // Evaluate graph health after flush
+        const healthIssue = evaluateGraphHealth(stats)
+        if (healthIssue) {
+          const errorMsg = `Graph index incomplete: ${healthIssue}. Run graph scan again or clear the cache.`
+          emitStatus('error', {
+            files: stats.files,
+            symbols: stats.symbols,
+            edges: stats.edges,
+            calls: stats.calls,
+          }, errorMsg)
+          workerHealthy = false
+        } else {
+          emitStatus('ready', {
+            files: stats.files,
+            symbols: stats.symbols,
+            edges: stats.edges,
+            calls: stats.calls,
+          })
+        }
       }
     } finally {
       isFlushing = false
@@ -173,9 +299,12 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
   }
 
   function scheduleFlush(): void {
-    if (flushTimer) {
-      clearTimeout(flushTimer)
+    if (closing || flushTimer) {
+      if (!closing && flushTimer) {
+        clearTimeout(flushTimer)
+      }
     }
+    if (closing) return
     flushTimer = setTimeout(() => {
       flushQueue().catch((err) => {
         logger.error('Graph flush failed', err)
@@ -184,6 +313,10 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
   }
 
   function enqueueChange(absPath: string): void {
+    if (closing) {
+      logger.debug(`Graph watcher: ignoring change during shutdown ${absPath}`)
+      return
+    }
     const normalized = normalizePath(absPath)
     if (!normalized) {
       logger.debug(`Graph watcher: ignoring non-indexable path ${absPath}`)
@@ -202,7 +335,7 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
   }
 
   function startWatcher(): void {
-    if (!watchEnabled || watcherInitialized) {
+    if (!watchEnabled || watcherInitialized || closing) {
       return
     }
 
@@ -232,7 +365,7 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
 
   const service: GraphService = {
     get ready(): boolean {
-      return initialized && workerHealthy && client.isReady()
+      return initialized && !closing && workerHealthy && client.isReady()
     },
 
     async scan(): Promise<void> {
@@ -271,6 +404,22 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
           await client.finalizeScan()
 
           const stats = await client.getStats()
+          
+          // Evaluate graph health - detect obviously incomplete indexes
+          const healthIssue = evaluateGraphHealth(stats)
+          if (healthIssue) {
+            const errorMsg = `Graph index incomplete: ${healthIssue}. Run graph scan again or clear the cache.`
+            emitStatus('error', {
+              files: stats.files,
+              symbols: stats.symbols,
+              edges: stats.edges,
+              calls: stats.calls,
+            }, errorMsg)
+            workerHealthy = false
+            throw new Error(errorMsg)
+          }
+          
+          workerHealthy = true
           emitStatus('ready', {
             files: stats.files,
             symbols: stats.symbols,
@@ -280,6 +429,7 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           emitStatus('error', undefined, msg)
+          workerHealthy = false
           throw err
         } finally {
           scanInFlight = null
@@ -290,23 +440,23 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
     },
 
     async close(): Promise<void> {
-      // Clear flush timer
+      // Mark as closing to prevent new work from being queued
+      closing = true
+
+      // Clear flush timer immediately
       if (flushTimer) {
         clearTimeout(flushTimer)
         flushTimer = null
       }
 
-      // Flush any remaining changes
-      if (pendingQueue.size > 0) {
-        await flushQueue()
-      }
+      // Discard pending queue rather than flushing during shutdown
+      pendingQueue.clear()
 
-      // Stop watcher
+      // Stop watcher before more paths can be enqueued
       stopWatcher()
 
-      // Close client
+      // Close client (and its worker) — worker owns the DB handle
       await client.close()
-      closeGraphDatabase()
       initialized = false
       workerHealthy = false
     },
@@ -397,6 +547,10 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
     },
 
     onFileChanged(absPath: string): void {
+      if (closing) {
+        logger.debug(`Graph service: ignoring file change during shutdown ${absPath}`)
+        return
+      }
       enqueueChange(absPath)
     },
   }
@@ -415,12 +569,8 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
       // Emit initializing status
       emitStatus('initializing')
 
-      // Calculate db path using cwd-scoped cache identity
-      const cacheHash = hashGraphCacheScope(projectId, cwd)
-      const graphDir = join(dataDir, 'graph', cacheHash)
-      dbPath = join(graphDir, 'graph.db')
-      
-      initializeGraphDatabase(projectId, dataDir, cwd)
+      // Ensure graph directory exists; worker thread is the sole DB owner
+      dbPath = ensureGraphDirectory(projectId, dataDir, cwd)
 
       // Create worker with explicit path resolution
       const workerPath = resolveWorkerPath()

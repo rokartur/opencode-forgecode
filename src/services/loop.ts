@@ -44,6 +44,9 @@ export function buildCompletionSignalInstructions(signal: string): string {
 
 export { LOOP_PERMISSION_RULESET } from '../constants/loop'
 
+/**
+ * Represents the runtime state of an autonomous loop.
+ */
 export interface LoopState {
   active: boolean
   sessionId: string
@@ -69,29 +72,136 @@ export interface LoopState {
 }
 
 export interface LoopService {
+  /**
+   * Gets the active state for a loop by name.
+   * @param name - The loop name.
+   * @returns The loop state if active, null otherwise.
+   */
   getActiveState(name: string): LoopState | null
+  /**
+   * Gets any state (active or completed) for a loop by name.
+   * @param name - The loop name.
+   * @returns The loop state if found, null otherwise.
+   */
   getAnyState(name: string): LoopState | null
+  /**
+   * Updates the state for a loop.
+   * @param name - The loop name.
+   * @param state - The new state to persist.
+   */
   setState(name: string, state: LoopState): void
+  /**
+   * Deletes the state for a loop.
+   * @param name - The loop name.
+   */
   deleteState(name: string): void
+  /**
+   * Registers a session as belonging to a loop.
+   * @param sessionId - The OpenCode session ID.
+   * @param loopName - The loop name to associate.
+   */
   registerLoopSession(sessionId: string, loopName: string): void
+  /**
+   * Resolves the loop name for a session.
+   * @param sessionId - The OpenCode session ID.
+   * @returns The loop name if found, null otherwise.
+   */
   resolveLoopName(sessionId: string): string | null
+  /**
+   * Unregisters a session from its loop.
+   * @param sessionId - The OpenCode session ID.
+   */
   unregisterLoopSession(sessionId: string): void
+  /**
+   * Checks if text contains the completion signal.
+   * @param text - The text to check.
+   * @param promise - The completion signal phrase.
+   * @returns True if the signal is present.
+   */
   checkCompletionSignal(text: string, promise: string): boolean
+  /**
+   * Builds the prompt for continuing a loop iteration.
+   * @param state - The current loop state.
+   * @param auditFindings - Optional audit findings to include.
+   * @returns The continuation prompt string.
+   */
   buildContinuationPrompt(state: LoopState, auditFindings?: string): string
+  /**
+   * Builds the prompt for the auditor agent.
+   * @param state - The current loop state.
+   * @returns The audit prompt string.
+   */
   buildAuditPrompt(state: LoopState): string
+  /**
+   * Lists all currently active loops.
+   * @returns Array of active loop states.
+   */
   listActive(): LoopState[]
+  /**
+   * Lists recently completed loops.
+   * @returns Array of completed loop states.
+   */
   listRecent(): LoopState[]
+  /**
+   * Finds a loop by exact or partial name match.
+   * @param name - The loop name to search for.
+   * @returns The matching loop state or null.
+   */
   findByLoopName(name: string): LoopState | null
+  /**
+   * Finds candidate loops matching a partial name.
+   * @param name - The partial name to search for.
+   * @returns Array of matching loop states.
+   */
   findCandidatesByPartialName(name: string): LoopState[]
+  /**
+   * Gets the configured stall timeout in milliseconds.
+   * @returns Stall timeout value.
+   */
   getStallTimeoutMs(): number
+  /**
+   * Gets the minimum number of audits required.
+   * @returns Minimum audit count.
+   */
   getMinAudits(): number
+  /**
+   * Terminates all active loops.
+   */
   terminateAll(): void
+  /**
+   * Reconciles loops that were active but are now stale.
+   * @returns Number of loops reconciled.
+   */
   reconcileStale(): number
+  /**
+   * Checks if there are outstanding review findings.
+   * @param branch - Optional branch to filter by.
+   * @returns True if findings exist.
+   */
   hasOutstandingFindings(branch?: string): boolean
+  /**
+   * Gets all outstanding review findings.
+   * @param branch - Optional branch to filter by.
+   * @returns Array of KV entries with findings.
+   */
   getOutstandingFindings(branch?: string): KvEntry[]
+  /**
+   * Generates a unique loop name based on a base name.
+   * @param baseName - The desired base name.
+   * @returns A unique loop name.
+   */
   generateUniqueLoopName(baseName: string): string
 }
 
+/**
+ * Creates a loop service instance for managing autonomous dev loops.
+ * 
+ * @param kvService - KV service for persistence.
+ * @param projectId - The current project ID.
+ * @param logger - Logger instance.
+ * @param loopConfig - Optional loop configuration.
+ * @returns A LoopService instance.
+ */
 export function createLoopService(
   kvService: KvService,
   projectId: string,
@@ -350,6 +460,15 @@ export interface LoopSessionOutput {
   fileChanges: { additions: number; deletions: number; files: number } | null
 }
 
+/**
+ * Fetches the output and statistics for a completed loop session.
+ * 
+ * @param v2Client - OpenCode v2 API client.
+ * @param sessionId - The session ID to fetch.
+ * @param directory - The working directory.
+ * @param logger - Optional logger for debugging.
+ * @returns Session output including messages, costs, and file changes.
+ */
 export async function fetchSessionOutput(
   v2Client: OpencodeClient,
   sessionId: string,

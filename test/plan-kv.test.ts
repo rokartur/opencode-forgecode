@@ -46,7 +46,7 @@ describe('plan-write', () => {
       sessionID: 'test-session',
       config: {} as any,
       sandboxManager: {} as any,
-    })
+    } as any)
   })
 
   afterEach(() => {
@@ -113,7 +113,7 @@ describe('plan-edit', () => {
       sessionID: 'test-session',
       config: {} as any,
       sandboxManager: {} as any,
-    })
+    } as any)
 
     // Seed with initial plan
     const initialPlan = `# Implementation Plan
@@ -216,7 +216,7 @@ describe('plan-read', () => {
       sessionID: 'test-session',
       config: {} as any,
       sandboxManager: {} as any,
-    })
+    } as any)
 
     // Seed with test plan
     const planContent = `# Implementation Plan
@@ -310,6 +310,18 @@ describe('plan-read', () => {
 
     expect(result).toContain('Invalid regex pattern')
   })
+
+  test('reads plan by explicit loop name', async () => {
+    kvService.set('test-project', 'plan:explicit-loop', '# Explicit Loop Plan\n\n## Phase 1\n- Read by loop name')
+
+    const result = await tools['plan-read'].execute(
+      { loop_name: 'explicit-loop' },
+      { sessionID: 'test-session', directory: TEST_DIR } as any
+    )
+
+    expect(result).toContain('# Explicit Loop Plan')
+    expect(result).toContain('Read by loop name')
+  })
 })
 
 describe('plan-read with loop session', () => {
@@ -332,7 +344,7 @@ describe('plan-read with loop session', () => {
       sessionID: 'test-session',
       config: {} as any,
       sandboxManager: {} as any,
-    })
+    } as any)
 
     kvService.set('test-project', 'plan:my-loop', '# Loop Plan\n\n## Phase 1\n- Do the thing')
   })

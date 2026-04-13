@@ -243,12 +243,12 @@ export class RepoMap {
     try {
       const ftsCount = this.db.prepare('SELECT COUNT(*) as c FROM symbols_fts').get() as { c: number } | undefined
       if (!ftsCount || ftsCount.c === 0) {
-        const symbols = this.stmts.getAllSymbols.all() as Array<{ id: number; name: string; file_id: number }>
+        const symbols = this.stmts.getAllSymbols.all() as Array<{ id: number; name: string; kind: string; file_id: number }>
         for (const sym of symbols) {
           const file = this.stmts.getFileById.get(sym.file_id) as { path: string } | undefined
           if (file) {
             try {
-              this.db.run('INSERT INTO symbols_fts (rowid, name, path) VALUES (?, ?, ?)', [sym.id, sym.name, file.path])
+              this.db.run('INSERT INTO symbols_fts (rowid, name, path, kind) VALUES (?, ?, ?, ?)', [sym.id, sym.name, file.path, sym.kind])
             } catch {
               // FTS insert may fail
             }
@@ -337,188 +337,124 @@ export class RepoMap {
    * This ensures stale file entries and derived data from previous scans are removed.
    */
   private resetGraphDataForFullScan(): void {
-    // Clear all derived state tables
-    this.db.run('DELETE FROM refs')
-    this.db.run('DELETE FROM edges')
-    this.db.run('DELETE FROM calls')
-    this.db.run('DELETE FROM cochanges')
-    this.db.run('DELETE FROM shape_hashes')
-    this.db.run('DELETE FROM token_signatures')
-    this.db.run('DELETE FROM token_fragments')
-    this.db.run('DELETE FROM external_imports')
-    this.db.run('DELETE FROM semantic_summaries')
-    // Clear symbols content - FTS entries will be rebuilt via triggers during re-indexing
-    // Note: We cannot use DELETE FROM symbols directly with FTS5 external content tables
-    // because the FTS delete triggers try to insert 'delete' entries that fail on empty tables.
-    // Instead we drop and recreate the FTS table to clear it cleanly, then recreate the FTS triggers.
-    this.db.run('DROP TABLE IF EXISTS symbols_fts')
-    this.db.run(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
-        name,
-        path,
-        kind,
-        content='symbols',
-        content_rowid='id'
-      )
-    `)
-    // Recreate the FTS sync triggers after recreating the FTS table
-    this.db.run(`
-      CREATE TRIGGER IF NOT EXISTS symbols_ai AFTER INSERT ON symbols BEGIN
-        INSERT INTO symbols_fts(rowid, name, path, kind)
-        VALUES (new.id, new.name, (SELECT path FROM files WHERE id = new.file_id), new.kind);
-      END
-    `)
-    this.db.run(`
-      CREATE TRIGGER IF NOT EXISTS symbols_ad AFTER DELETE ON symbols BEGIN
-        INSERT INTO symbols_fts(symbols_fts, rowid, name, path, kind) VALUES('delete', old.id, old.name, '', old.kind);
-      END
-    `)
-    this.db.run(`
-      CREATE TRIGGER IF NOT EXISTS symbols_au AFTER UPDATE ON symbols BEGIN
-        INSERT INTO symbols_fts(symbols_fts, rowid, name, path, kind) VALUES('delete', old.id, old.name, '', old.kind);
-        INSERT INTO symbols_fts(rowid, name, path, kind)
-        VALUES (new.id, new.name, (SELECT path FROM files WHERE id = new.file_id), new.kind);
-      END
-    `)
-    this.db.run('DELETE FROM symbols')
-    // Clear files table - will be repopulated during scan
-    this.db.run('DELETE FROM files')
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM refs')
+      this.db.run('DELETE FROM edges')
+      this.db.run('DELETE FROM calls')
+      this.db.run('DELETE FROM cochanges')
+      this.db.run('DELETE FROM shape_hashes')
+      this.db.run('DELETE FROM token_signatures')
+      this.db.run('DELETE FROM token_fragments')
+      this.db.run('DELETE FROM external_imports')
+      this.db.run('DELETE FROM semantic_summaries')
+      // Drop and recreate FTS table to avoid trigger issues on empty content tables
+      this.db.run('DROP TABLE IF EXISTS symbols_fts')
+      this.db.run(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
+          name,
+          path,
+          kind
+        )
+      `)
+      this.db.run('DROP TRIGGER IF EXISTS symbols_ai')
+      this.db.run('DROP TRIGGER IF EXISTS symbols_ad')
+      this.db.run('DROP TRIGGER IF EXISTS symbols_au')
+      this.db.run(`
+        CREATE TRIGGER symbols_ai AFTER INSERT ON symbols BEGIN
+          INSERT INTO symbols_fts(rowid, name, path, kind)
+          VALUES (new.id, new.name, (SELECT path FROM files WHERE id = new.file_id), new.kind);
+        END
+      `)
+      this.db.run(`
+        CREATE TRIGGER symbols_ad AFTER DELETE ON symbols BEGIN
+          DELETE FROM symbols_fts WHERE rowid = old.id;
+        END
+      `)
+      this.db.run(`
+        CREATE TRIGGER symbols_au AFTER UPDATE ON symbols BEGIN
+          DELETE FROM symbols_fts WHERE rowid = old.id;
+          INSERT INTO symbols_fts(rowid, name, path, kind)
+          VALUES (new.id, new.name, (SELECT path FROM files WHERE id = new.file_id), new.kind);
+        END
+      `)
+      this.db.run('DELETE FROM symbols')
+      this.db.run('DELETE FROM files')
+    })()
   }
 
 
 
   async indexFile(filePath: string): Promise<void> {
-    // Normalize path against cwd - handle both absolute and relative paths
     const absPath = filePath.startsWith('/') ? filePath : resolve(this.cwd, filePath)
     const relPath = relative(this.cwd, absPath)
-    
+
     const ext = extname(absPath).toLowerCase()
     if (!(ext in INDEXABLE_EXTENSIONS)) return
-    
+
     let stats: { size: number; mtimeMs: number }
     try {
       stats = statSync(absPath)
     } catch {
       return
     }
-    
+
     if (stats.size > 500_000) return
-    
-    // Use absolute path for tree-sitter to ensure consistent caching
+
     const outline = await this.treeSitter.getFileOutline(absPath)
     if (!outline) return
-    
+
     const existing = this.stmts.getFileByPath.get(relPath) as IndexedFile | undefined
     if (existing && existing.mtime_ms === stats.mtimeMs) {
       return
     }
-    
-    if (existing) {
-      this.stmts.deleteRefsByFileId.run([existing.id])
-      this.stmts.deleteEdgesBySource.run([existing.id])
-      this.stmts.deleteEdgesByTarget.run([existing.id])
-      this.stmts.deleteSymbolsByFileId.run([existing.id])
-      this.stmts.deleteShapeHashesByFileId.run([existing.id])
-      this.stmts.deleteTokenSignaturesByFileId.run([existing.id])
-      this.stmts.deleteTokenFragmentsByFileId.run([existing.id])
-      this.stmts.deleteFile.run([existing.id])
-    }
-    
+
     const isBarrel = isBarrelFile(relPath)
-    const lineCount = outline.symbols.length > 0 
+    const lineCount = outline.symbols.length > 0
       ? Math.max(...outline.symbols.map(s => s.location.endLine || s.location.line))
       : 1
-    
-    const fileId = this.db.run(
-      'INSERT INTO files (path, mtime_ms, language, line_count, symbol_count, pagerank, is_barrel, indexed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [relPath, stats.mtimeMs, outline.language, lineCount, outline.symbols.length, 0, isBarrel ? 1 : 0, Date.now()]
-    ).lastInsertRowid as number
-    
-    // Extract signatures using the utility function
+
+    // Async I/O: collect all data before entering the synchronous transaction
     const { readFile } = await import('fs/promises')
     const content = await readFile(absPath, 'utf-8')
     const lines = content.split('\n')
-    
-    // Deduplicate symbols by line and name to prevent duplicate DB rows
-    // This is a second line of defense after tree-sitter deduplication
-    const seenSymbols = new Set<string>()
-    for (const sym of outline.symbols) {
-      const key = `${sym.location.line}-${sym.name}-${sym.kind}`
-      if (seenSymbols.has(key)) continue
-      seenSymbols.add(key)
-      
-      const signature = extractSignature(lines, sym.location.line - 1, sym.kind)
-      this.stmts.insertSymbol.run([
-        fileId,
-        sym.name,
-        sym.kind,
-        sym.location.line,
-        sym.location.endLine || sym.location.line,
-        outline.exports.some(e => e.name === sym.name) ? 1 : 0,
-        signature || null,
-        sym.name
-      ])
-    }
-    
-    // Process imports - distinguish internal vs external
+
+    // Pre-resolve imports
+    const resolvedImports: Array<{ specifiers: string[]; sourceFileId: number | null; importSource: string }> = []
     const externalImports: Array<{ package: string; specifiers: string[] }> = []
-    
+
     for (const imp of outline.imports) {
       const isRelative = imp.source.startsWith('.') || imp.source.startsWith('/')
-      
+
       if (isRelative) {
-        // Internal relative import - resolve and track in refs
         const resolvedSource = await this.resolveImportSource(imp.source, absPath)
         let sourceFileId: number | null = null
-        
         if (resolvedSource) {
           const resolvedFile = this.stmts.getFileByPath.get(resolvedSource) as IndexedFile | undefined
           if (resolvedFile) {
             sourceFileId = resolvedFile.id
           }
         }
-        
-        for (const specifier of imp.specifiers) {
-          this.stmts.insertRef.run([fileId, specifier, sourceFileId, imp.source])
-        }
+        resolvedImports.push({ specifiers: imp.specifiers, sourceFileId, importSource: imp.source })
       } else {
-        // External package import - track in external_imports
-        // Preserve scoped package names (e.g. @types/node, @opencode-ai/sdk)
         let packageName: string
         if (imp.source.startsWith('@')) {
-          // Scoped package: take first two segments (@scope/name)
           const parts = imp.source.split('/')
           packageName = parts.length >= 2 ? `${parts[0]}/${parts[1]}` : parts[0]
         } else {
-          // Unscoped package: take first segment
           packageName = imp.source.split('/')[0]
         }
         externalImports.push({ package: packageName, specifiers: imp.specifiers })
       }
     }
-    
-    // Insert external imports
-    for (const extImp of externalImports) {
-      this.db.run(
-        'INSERT INTO external_imports (file_id, package, specifiers) VALUES (?, ?, ?)',
-        [fileId, extImp.package, extImp.specifiers.join(',')]
-      )
-    }
-    
+
     const shapeHashes = await this.treeSitter.getShapeHashes(filePath)
-    if (shapeHashes) {
-      for (const hash of shapeHashes) {
-        this.db.run(
-          'INSERT INTO shape_hashes (file_id, name, kind, line, end_line, shape_hash, node_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [fileId, hash.name, hash.kind, hash.line, hash.endLine, hash.shapeHash, hash.nodeCount]
-        )
-      }
-    }
-    
+
+    // Pre-compute token data
+    let tokenSignatures: Array<{ name: string; line: number; endLine: number; minhash: Uint32Array }> = []
+    let fragmentHashes: Array<{ hash: string; tokenOffset: number }> = []
     try {
-      // Use absolute path for cache lookup to match tree-sitter caching convention
-      const content = await this.cache.get(absPath) || ''
-      const tokens = tokenize(content)
+      const cachedContent = await this.cache.get(absPath) || ''
+      const tokens = tokenize(cachedContent)
       const minhash = computeMinHash(tokens)
       if (minhash) {
         for (const sym of outline.symbols) {
@@ -527,24 +463,93 @@ export class RepoMap {
             Math.floor((sym.location.endLine || sym.location.line) * tokens.length / lineCount)
           ))
           if (symMinhash) {
-            this.db.run(
-              'INSERT INTO token_signatures (file_id, name, line, end_line, minhash) VALUES (?, ?, ?, ?, ?)',
-              [fileId, sym.name, sym.location.line, sym.location.endLine || sym.location.line, symMinhash]
-            )
+            tokenSignatures.push({
+              name: sym.name,
+              line: sym.location.line,
+              endLine: sym.location.endLine || sym.location.line,
+              minhash: symMinhash,
+            })
           }
         }
-        
-        const fragmentHashes = computeFragmentHashes(tokens)
-        for (const frag of fragmentHashes) {
-          this.db.run(
-            'INSERT INTO token_fragments (hash, file_id, name, line, token_offset) VALUES (?, ?, ?, ?, ?)',
-            [frag.hash, fileId, '', 1, frag.tokenOffset]
-          )
-        }
+        fragmentHashes = computeFragmentHashes(tokens)
       }
     } catch (err) {
       console.debug('Token extraction failed for file:', filePath, err)
     }
+
+    // All DB writes in a single transaction
+    this.db.transaction(() => {
+      if (existing) {
+        this.stmts.deleteRefsByFileId.run([existing.id])
+        this.stmts.deleteEdgesBySource.run([existing.id])
+        this.stmts.deleteEdgesByTarget.run([existing.id])
+        this.stmts.deleteSymbolsByFileId.run([existing.id])
+        this.stmts.deleteShapeHashesByFileId.run([existing.id])
+        this.stmts.deleteTokenSignaturesByFileId.run([existing.id])
+        this.stmts.deleteTokenFragmentsByFileId.run([existing.id])
+        this.stmts.deleteFile.run([existing.id])
+      }
+
+      const fileId = this.db.run(
+        'INSERT INTO files (path, mtime_ms, language, line_count, symbol_count, pagerank, is_barrel, indexed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [relPath, stats.mtimeMs, outline.language, lineCount, outline.symbols.length, 0, isBarrel ? 1 : 0, Date.now()]
+      ).lastInsertRowid as number
+
+      const seenSymbols = new Set<string>()
+      for (const sym of outline.symbols) {
+        const key = `${sym.location.line}-${sym.name}-${sym.kind}`
+        if (seenSymbols.has(key)) continue
+        seenSymbols.add(key)
+
+        const signature = extractSignature(lines, sym.location.line - 1, sym.kind)
+        this.stmts.insertSymbol.run([
+          fileId,
+          sym.name,
+          sym.kind,
+          sym.location.line,
+          sym.location.endLine || sym.location.line,
+          outline.exports.some(e => e.name === sym.name) ? 1 : 0,
+          signature || null,
+          sym.name
+        ])
+      }
+
+      for (const ref of resolvedImports) {
+        for (const specifier of ref.specifiers) {
+          this.stmts.insertRef.run([fileId, specifier, ref.sourceFileId, ref.importSource])
+        }
+      }
+
+      for (const extImp of externalImports) {
+        this.db.run(
+          'INSERT INTO external_imports (file_id, package, specifiers) VALUES (?, ?, ?)',
+          [fileId, extImp.package, extImp.specifiers.join(',')]
+        )
+      }
+
+      if (shapeHashes) {
+        for (const hash of shapeHashes) {
+          this.db.run(
+            'INSERT INTO shape_hashes (file_id, name, kind, line, end_line, shape_hash, node_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [fileId, hash.name, hash.kind, hash.line, hash.endLine, hash.shapeHash, hash.nodeCount]
+          )
+        }
+      }
+
+      for (const sig of tokenSignatures) {
+        this.db.run(
+          'INSERT INTO token_signatures (file_id, name, line, end_line, minhash) VALUES (?, ?, ?, ?, ?)',
+          [fileId, sig.name, sig.line, sig.endLine, sig.minhash]
+        )
+      }
+
+      for (const frag of fragmentHashes) {
+        this.db.run(
+          'INSERT INTO token_fragments (hash, file_id, name, line, token_offset) VALUES (?, ?, ?, ?, ?)',
+          [frag.hash, fileId, '', 1, frag.tokenOffset]
+        )
+      }
+    })()
   }
 
   private async resolveImportSource(importSource: string, fromFile: string): Promise<string | null> {
@@ -575,42 +580,43 @@ export class RepoMap {
 
   async resolveUnresolvedRefs(): Promise<void> {
     const unresolved = this.stmts.getUnresolvedRefs.all() as Ref[]
-    
-    for (const ref of unresolved) {
-      // Find matching exported symbols by name
-      // Prefer matches from the import source path if available
-      const matches = this.db.prepare(`
-        SELECT s.id, s.file_id, f.path 
-        FROM symbols s 
-        JOIN files f ON s.file_id = f.id 
-        WHERE s.name = ? AND s.is_exported = 1
-      `).all(ref.name) as Array<{ id: number; file_id: number; path: string }>
-      
-      if (matches.length >= 1) {
-        // If we have an import source, try to match by path first
-        if (ref.import_source) {
-          const pathMatch = matches.find(m => {
-            const importPath = ref.import_source.startsWith('.') 
-              ? ref.import_source 
-              : ref.import_source
-            return m.path === importPath || m.path.endsWith(importPath)
-          })
-          if (pathMatch) {
-            this.db.run('UPDATE refs SET source_file_id = ? WHERE id = ?', [pathMatch.file_id, ref.id])
-            continue
+    if (unresolved.length === 0) return
+
+    const findExported = this.db.prepare(`
+      SELECT s.id, s.file_id, f.path
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      WHERE s.name = ? AND s.is_exported = 1
+    `)
+
+    this.db.transaction(() => {
+      for (const ref of unresolved) {
+        const matches = findExported.all(ref.name) as Array<{ id: number; file_id: number; path: string }>
+
+        if (matches.length >= 1) {
+          if (ref.import_source) {
+            const pathMatch = matches.find(m => {
+              const importPath = ref.import_source.startsWith('.')
+                ? ref.import_source
+                : ref.import_source
+              return m.path === importPath || m.path.endsWith(importPath)
+            })
+            if (pathMatch) {
+              this.db.run('UPDATE refs SET source_file_id = ? WHERE id = ?', [pathMatch.file_id, ref.id])
+              continue
+            }
           }
+
+          this.db.run('UPDATE refs SET source_file_id = ? WHERE id = ?', [matches[0].file_id, ref.id])
         }
-        
-        // Fall back to first match by name (best effort for ambiguous cases)
-        this.db.run('UPDATE refs SET source_file_id = ? WHERE id = ?', [matches[0].file_id, ref.id])
       }
-    }
+    })()
   }
 
   async buildEdges(): Promise<void> {
     const refs = this.stmts.getAllRefs.all() as Ref[]
     const edgeMap = new Map<string, { weight: number; confidence: number }>()
-    
+
     for (const ref of refs) {
       if (ref.source_file_id) {
         const key = `${ref.file_id}-${ref.source_file_id}`
@@ -622,13 +628,15 @@ export class RepoMap {
         }
       }
     }
-    
-    for (const [key, data] of edgeMap) {
-      const [source, target] = key.split('-').map(Number)
-      const idf = Math.log(2)
-      const dampenedWeight = data.weight * idf
-      this.stmts.insertEdge.run([source, target, dampenedWeight, data.confidence])
-    }
+
+    this.db.transaction(() => {
+      for (const [key, data] of edgeMap) {
+        const [source, target] = key.split('-').map(Number)
+        const idf = Math.log(2)
+        const dampenedWeight = data.weight * idf
+        this.stmts.insertEdge.run([source, target, dampenedWeight, data.confidence])
+      }
+    })()
   }
 
 
@@ -681,10 +689,12 @@ export class RepoMap {
       }
     }
     
-    for (const file of files) {
-      const rank = ranks.get(file.id) || 0
-      this.db.run('UPDATE files SET pagerank = ? WHERE id = ?', [rank, file.id])
-    }
+    this.db.transaction(() => {
+      for (const file of files) {
+        const rank = ranks.get(file.id) || 0
+        this.db.run('UPDATE files SET pagerank = ? WHERE id = ?', [rank, file.id])
+      }
+    })()
   }
 
   async computePageRankSync(): Promise<void> {
@@ -1255,18 +1265,20 @@ export class RepoMap {
 
   linkTestFiles(): void {
     const testFiles = this.stmts.getTestFiles.all() as Array<{ id: number; path: string }>
-    
-    for (const testFile of testFiles) {
-      const sourcePath = testFile.path
-        .replace(/\.test\./, '.')
-        .replace(/_test\./, '.')
-        .replace(/\.spec\./, '.')
-      
-      const source = this.stmts.getFileByPath.get(sourcePath) as IndexedFile | undefined
-      if (source) {
-        this.stmts.insertEdge.run([testFile.id, source.id, 1, 1])
+
+    this.db.transaction(() => {
+      for (const testFile of testFiles) {
+        const sourcePath = testFile.path
+          .replace(/\.test\./, '.')
+          .replace(/_test\./, '.')
+          .replace(/\.spec\./, '.')
+
+        const source = this.stmts.getFileByPath.get(sourcePath) as IndexedFile | undefined
+        if (source) {
+          this.stmts.insertEdge.run([testFile.id, source.id, 1, 1])
+        }
       }
-    }
+    })()
   }
 
   rescueOrphans(): void {

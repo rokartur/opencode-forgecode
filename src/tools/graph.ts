@@ -19,52 +19,52 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
         action: z.enum(['status', 'scan']).describe('Action to perform'),
       },
       execute: async (args) => {
-        if (!graphService) {
-          return 'Graph service not available. Ensure the graph feature is enabled in config.'
-        }
-
-        try {
-          switch (args.action) {
-            case 'status': {
-              if (!graphService.ready) {
-                // Check KV store for actual state (indexing, initializing, etc.)
-                const status = ctx.kvService.get<{ state: string; message?: string; stats?: { files: number; symbols: number; edges: number; calls: number } }>(ctx.projectId, 'graph:status')
-                if (status) {
-                  const stateMsg = status.state === 'indexing' && status.message
-                    ? status.message
-                    : `State: ${status.state}`
-                  const statsMsg = status.stats
-                    ? `\nStats so far:\n- Files: ${status.stats.files}\n- Symbols: ${status.stats.symbols}`
-                    : ''
-                  return `Graph Status: ${stateMsg}${statsMsg}\nReady: false`
-                }
-                return 'Graph service is not ready. Worker may be unavailable or initialization failed.'
-              }
-              const stats = await graphService.getStats()
-              return `Graph Status:
+        // Always allow scan action even when not ready - it's the recovery path
+        if (args.action === 'scan') {
+          if (!graphService) {
+            return 'Graph service not available. Ensure the graph feature is enabled in config.'
+          }
+          logger.log('graph-status: starting scan')
+          await graphService.scan()
+          const stats = await graphService.getStats()
+          return `Graph scan completed:
 - Files: ${stats.files}
 - Symbols: ${stats.symbols}
 - Edges: ${stats.edges}
 - Calls: ${stats.calls}
 - Ready: ${graphService.ready}`
-            }
+        }
 
-            case 'scan': {
-              if (!graphService.ready) {
-                return 'Graph service is not ready. Cannot perform scan.'
-              }
-              logger.log('graph-status: starting scan')
-              await graphService.scan()
-              const stats = await graphService.getStats()
-              return `Graph scan complete. Stats:
+        // For status action, check KV store when not ready
+        if (!graphService || !graphService.ready) {
+          const status = ctx.kvService.get<{ state: string; message?: string; stats?: { files: number; symbols: number; edges: number; calls: number } }>(ctx.projectId, 'graph:status')
+          if (status) {
+            if (status.state === 'error' && status.message) {
+              const statsMsg = status.stats
+                ? `\nStats:\n- Files: ${status.stats.files}\n- Symbols: ${status.stats.symbols}\n- Edges: ${status.stats.edges}\n- Calls: ${status.stats.calls}`
+                : ''
+              return `Graph Status: State: error\nError: ${status.message}${statsMsg}\nReady: false\n\nRun graph-status with action "scan" to rebuild the index.`
+            }
+            const stateMsg = status.state === 'indexing' && status.message
+              ? status.message
+              : `State: ${status.state}`
+            const statsMsg = status.stats
+              ? `\nStats so far:\n- Files: ${status.stats.files}\n- Symbols: ${status.stats.symbols}`
+              : ''
+            return `Graph Status: ${stateMsg}${statsMsg}\nReady: false`
+          }
+          return 'Graph service is not ready. Worker may be unavailable or initialization failed.'
+        }
+
+        // Service is ready - handle status action
+        try {
+          const stats = await graphService.getStats()
+          return `Graph Status:
 - Files: ${stats.files}
 - Symbols: ${stats.symbols}
-- Edges: ${stats.edges}`
-            }
-
-            default:
-              return 'Unknown action'
-          }
+- Edges: ${stats.edges}
+- Calls: ${stats.calls}
+- Ready: ${graphService.ready}`
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error)
           return `Error: ${msg}`
@@ -83,6 +83,11 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
       },
       execute: async (args) => {
         if (!graphService || !graphService.ready) {
+          // Check for error state in KV store
+          const status = ctx.kvService.get<{ state: string; message?: string }>(ctx.projectId, 'graph:status')
+          if (status?.state === 'error' && status.message) {
+            return `Graph index unavailable: ${status.message}`
+          }
           return 'Graph not indexed yet. Run graph-status with action "scan" first.'
         }
 
@@ -162,6 +167,11 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
       },
       execute: async (args) => {
         if (!graphService || !graphService.ready) {
+          // Check for error state in KV store
+          const status = ctx.kvService.get<{ state: string; message?: string }>(ctx.projectId, 'graph:status')
+          if (status?.state === 'error' && status.message) {
+            return `Graph index unavailable: ${status.message}`
+          }
           return 'Graph not indexed yet. Run graph-status with action "scan" first.'
         }
 
@@ -241,6 +251,11 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
       },
       execute: async (args) => {
         if (!graphService || !graphService.ready) {
+          // Check for error state in KV store
+          const status = ctx.kvService.get<{ state: string; message?: string }>(ctx.projectId, 'graph:status')
+          if (status?.state === 'error' && status.message) {
+            return `Graph index unavailable: ${status.message}`
+          }
           return 'Graph not indexed yet. Run graph-status with action "scan" first.'
         }
 
