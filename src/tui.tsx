@@ -133,19 +133,11 @@ async function restartLoop(projectId: string, loopName: string, api: TuiPluginAp
     const directory = state.worktreeDir
     if (!directory) return null
     
-    // Load config and resolve log target for permission ruleset
+    // Worktree sessions no longer need log directory access since logging is dispatched via host session
     const { loadPluginConfig } = await import('./setup')
-    const { resolveWorktreeLogTarget } = await import('./services/worktree-log')
     const config = loadPluginConfig()
-    const dataDir = resolveDataDir()
-    const logTarget = resolveWorktreeLogTarget(config, {
-      projectDir: state.projectDir || state.worktreeDir,
-      sandboxHostDir: directory,
-      sandbox: state.sandbox,
-      dataDir,
-    })
     const agentExclusions = agents.code.tools?.exclude
-    const permissionRuleset = buildLoopPermissionRuleset(config, logTarget?.permissionPath ?? null, {
+    const permissionRuleset = buildLoopPermissionRuleset(config, null, {
       isWorktree: !!state.worktree,
       agentExclusions,
     })

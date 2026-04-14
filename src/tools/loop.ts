@@ -53,6 +53,7 @@ export async function setupLoop(
 
   if (!options.worktree) {
     // Non-worktree: resolve log target using project directory
+    // Note: In-place loops may still need log directory access if they write logs directly
     const logTarget = resolveWorktreeLogTarget(config, {
       projectDir: projectDir,
       sandboxHostDir: undefined,
@@ -103,16 +104,10 @@ export async function setupLoop(
     const worktreeInfo = worktreeResult.data
     logger.log(`loop: worktree created at ${worktreeInfo.directory} (branch: ${worktreeInfo.branch})`)
 
-    // Now resolve log target using the host project directory for path resolution
-    const sandboxEnabled = isSandboxEnabled(config, sandboxManager) && !!options.worktree
-    const logTarget = resolveWorktreeLogTarget(config, {
-      projectDir: projectDir,
-      sandboxHostDir: worktreeInfo.directory,
-      sandbox: sandboxEnabled,
-      dataDir: ctx.dataDir,
-    }, ctx.logger)
+    // Worktree sessions no longer need log directory access since logging is dispatched via host session
+    // Only resolve log target for non-worktree sessions or if needed for other purposes
     const agentExclusions = agents.code.tools?.exclude
-    const permissionRuleset = buildLoopPermissionRuleset(config, logTarget?.permissionPath ?? null, {
+    const permissionRuleset = buildLoopPermissionRuleset(config, null, {
       isWorktree: true,
       agentExclusions,
     })
@@ -474,16 +469,9 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
             }
           }
 
-          // Resolve log target for permission ruleset (pure, no filesystem mutation)
-          // Use host project directory for path resolution, worktree for sandbox mapping
-          const logTarget = resolveWorktreeLogTarget(config, {
-            projectDir: stoppedState.projectDir,
-            sandboxHostDir: stoppedState.worktreeDir,
-            sandbox: stoppedState.sandbox,
-            dataDir: ctx.dataDir,
-          }, ctx.logger)
+          // Worktree sessions no longer need log directory access since logging is dispatched via host session
           const agentExclusions = agents.code.tools?.exclude
-          const permissionRuleset = buildLoopPermissionRuleset(config, logTarget?.permissionPath ?? null, {
+          const permissionRuleset = buildLoopPermissionRuleset(config, null, {
             isWorktree: !!stoppedState.worktree,
             agentExclusions,
           })

@@ -19,6 +19,39 @@ export interface WorktreeLogContext {
 }
 
 /**
+ * Serializable payload containing all data needed for worktree completion logging.
+ * This allows the host session to write logs without needing access to the worktree session.
+ */
+export interface WorktreeCompletionLogPayload {
+  /** The configured log directory (host path). */
+  logDirectory: string
+  /** The project directory (host path). */
+  projectDir: string
+  /** The name of the completed loop. */
+  loopName: string
+  /** ISO timestamp of completion. */
+  completionTimestamp: string
+  /** The iteration count when the loop completed. */
+  iteration: number
+  /** The worktree branch name, if applicable. */
+  worktreeBranch?: string
+  /** Summary of what was accomplished. */
+  summary: string
+}
+
+/**
+ * Result of building a worktree completion log payload.
+ */
+export interface BuildWorktreeCompletionPayloadResult {
+  /** The serializable payload for logging. */
+  payload: WorktreeCompletionLogPayload
+  /** The permission path for sandbox rules (may be null if outside sandbox mount). */
+  permissionPath: string | null
+  /** The resolved host path for the log directory. */
+  hostPath: string
+}
+
+/**
  * Result of resolving a worktree log target.
  * Contains both the host path and the permission path for sandbox-aware rules.
  */
@@ -243,9 +276,99 @@ export function appendWorktreeLogEntry(
 }
 
 /**
+ * Builds a serializable payload for worktree completion logging.
+ * This payload contains all data needed to write a log entry from the host session.
+ * 
+ * @returns The payload result with hostPath and permissionPath, or null if logging is disabled/misconfigured
+ */
+export function buildWorktreeCompletionPayload(
+  config: PluginConfig,
+  options: {
+    projectDir: string
+    loopName: string
+    completionTimestamp: Date
+    sessionOutput: LoopSessionOutput | null
+    iteration: number
+    worktreeBranch?: string
+    summary?: string
+    dataDir?: string
+  },
+  logger?: Logger,
+): BuildWorktreeCompletionPayloadResult | null {
+  const worktreeLogging = config.loop?.worktreeLogging
+  if (!worktreeLogging?.enabled) {
+    logger?.debug('Worktree logging: disabled, skipping')
+    return null
+  }
+
+  // Resolve the log target using the host project directory
+  const logTarget = resolveWorktreeLogTarget(config, {
+    projectDir: options.projectDir,
+    dataDir: options.dataDir,
+  }, logger)
+  
+  if (!logTarget) {
+    return null
+  }
+
+  const summary = options.summary ?? (options.sessionOutput 
+    ? summarizeSessionOutput(options.sessionOutput)
+    : 'No session output available')
+
+  const payload: WorktreeCompletionLogPayload = {
+    logDirectory: logTarget.hostPath,
+    projectDir: options.projectDir,
+    loopName: options.loopName,
+    completionTimestamp: options.completionTimestamp.toISOString(),
+    iteration: options.iteration,
+    worktreeBranch: options.worktreeBranch,
+    summary,
+  }
+
+  return {
+    payload,
+    permissionPath: logTarget.permissionPath,
+    hostPath: logTarget.hostPath,
+  }
+}
+
+/**
+ * Writes a worktree completion log entry from a prepared payload.
+ * This is the host-side writer that should be called from a host session context.
+ * 
+ * @returns true on success, false on failure (fails closed)
+ */
+export function writeWorktreeCompletionLog(
+  payload: WorktreeCompletionLogPayload,
+  logger?: Logger,
+): boolean {
+  // Validate and initialize the host path before writing
+  if (!ensureWorktreeLogDirectory(payload.logDirectory, logger)) {
+    return false
+  }
+
+  const completionDate = new Date(payload.completionTimestamp)
+  
+  return appendWorktreeLogEntry(
+    payload.logDirectory,
+    {
+      projectDir: payload.projectDir,
+      loopName: payload.loopName,
+      completionTimestamp: completionDate,
+      summary: payload.summary,
+      iteration: payload.iteration,
+      worktreeBranch: payload.worktreeBranch,
+    },
+    logger,
+  )
+}
+
+/**
  * Main entry point: logs a completed worktree loop.
  * Validates config, resolves directory, and appends the log entry.
  * Returns true on success, false on failure (fails closed).
+ * 
+ * @deprecated Use buildWorktreeCompletionPayload + writeWorktreeCompletionLog for host-session dispatch
  */
 export function logWorktreeCompletion(
   config: PluginConfig,

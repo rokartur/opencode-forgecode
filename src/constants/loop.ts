@@ -15,7 +15,9 @@ export const LOOP_PERMISSION_RULESET: PermissionRule[] = [
  * - In-place loops omit the allow-all so the agent's own permissions apply.
  * - Agent tool exclusions are appended as deny rules at the end so they
  *   take precedence over the allow-all via the harness's findLast semantics.
- * - Adds external_directory allow rule for worktree logging when configured.
+ * - Adds external_directory allow rule for worktree logging when configured AND needed.
+ *   Note: With host-session dispatch, worktree sessions no longer need direct host log access.
+ *   This parameter is kept for backward compatibility but should be null for new designs.
  */
 export function buildLoopPermissionRuleset(
   config: PluginConfig,
@@ -34,6 +36,9 @@ export function buildLoopPermissionRuleset(
     { permission: 'bash', pattern: 'git push *', action: 'deny' },
   )
 
+  // Only add external_directory allow rule when logDirectory is provided and logging is enabled
+  // In the new host-session dispatch design, this should be null for worktree sessions
+  // since the host session (not the worktree) writes the logs
   if (logDirectory && config.loop?.worktreeLogging?.enabled) {
     rules.push({
       permission: 'external_directory',

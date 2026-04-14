@@ -8,7 +8,7 @@ import { resolveLoopModel } from '../utils/loop-helpers'
 import { execSync, spawnSync } from 'child_process'
 import { resolve } from 'path'
 import type { createSandboxManager } from '../sandbox/manager'
-import { logWorktreeCompletion, resolveWorktreeLogTarget } from '../services/worktree-log'
+import { buildWorktreeCompletionPayload, type BuildWorktreeCompletionPayloadResult } from '../services/worktree-log'
 import { buildLoopPermissionRuleset } from '../constants/loop'
 import { agents } from '../agents'
 
@@ -214,6 +214,90 @@ export function createLoopEventHandler(
     }
   }
 
+  /**
+   * Spawns a dedicated host session to write worktree completion logs.
+   * This avoids permission issues by running in the host context rather than the worktree sandbox.
+   */
+  async function dispatchWorktreeCompletionLogSession(
+    client: OpencodeClient,
+    completionResult: BuildWorktreeCompletionPayloadResult,
+    hostProjectDir: string,
+    sessionLogger: Logger,
+  ): Promise<void> {
+    try {
+      // Create a minimal permission ruleset for the host logging session
+      // Only needs access to the log directory
+      const loggingPermissionRules = [
+        { permission: 'external_directory', pattern: completionResult.hostPath, action: 'allow' as const },
+      ]
+
+      // Create host session rooted at project directory
+      const createResult = await client.session.create({
+        title: `Log: ${completionResult.payload.loopName}`,
+        directory: hostProjectDir,
+        permission: loggingPermissionRules,
+      })
+
+      if (createResult.error || !createResult.data) {
+        sessionLogger.error(`Loop: failed to create host logging session: ${createResult.error}`)
+        return
+      }
+
+      const hostSessionId = createResult.data.id
+
+      // Build the logging prompt with explicit structured data
+      const payload = completionResult.payload
+      const loggingPrompt = `You are a logging agent. Write a single completion log entry to the file system.
+
+**Instructions:**
+1. Write exactly ONE markdown entry to the log file at: ${payload.logDirectory}
+2. Use the following structured data:
+
+\`\`\`json
+{
+  "loopName": "${payload.loopName}",
+  "projectDir": "${payload.projectDir}",
+  "completionTimestamp": "${payload.completionTimestamp}",
+  "iteration": ${payload.iteration},
+  "worktreeBranch": "${payload.worktreeBranch || 'N/A'}",
+  "summary": "${payload.summary.replace(/"/g, '\\"')}"
+}
+\`\`\`
+
+3. The log file should be named: ${payload.completionTimestamp.split('T')[0]}.md
+4. Append the entry in this exact format:
+
+## ${payload.loopName}
+
+- **Project:** ${payload.projectDir}
+- **Loop:** ${payload.loopName}${payload.worktreeBranch ? `\n- **Branch:** ${payload.worktreeBranch}` : ''}
+- **Completed:** ${payload.completionTimestamp}
+- **Iteration:** ${payload.iteration}
+- **Summary:** ${payload.summary}
+
+---
+
+5. After writing the log entry, stop. Do not perform any other actions.`
+
+      // Prompt the host session to write the log
+      const promptResult = await client.session.promptAsync({
+        sessionID: hostSessionId,
+        directory: hostProjectDir,
+        parts: [{ type: 'text' as const, text: loggingPrompt }],
+      })
+
+      // Check for prompt errors and log them explicitly
+      if (promptResult.error) {
+        sessionLogger.error(`Loop: host logging session prompt failed: ${promptResult.error}`)
+      } else {
+        sessionLogger.debug(`Loop: dispatched completion log to host session ${hostSessionId}`)
+      }
+    } catch (err) {
+      sessionLogger.error(`Loop: failed to dispatch host logging session`, err)
+      // Non-fatal: continue with normal loop cleanup even if logging fails
+    }
+  }
+
   async function terminateLoop(loopName: string, state: LoopState, reason: string): Promise<void> {
     const sessionId = state.sessionId
     stopWatchdog(loopName)
@@ -274,11 +358,13 @@ export function createLoopEventHandler(
     logger.log(`Loop terminated: reason="${reason}", loop="${state.loopName}", iteration=${state.iteration}`)
 
     // Log worktree completion if configured and loop completed successfully
+    // Dispatch via host session to avoid sandbox permission issues
     if (reason === 'completed' && state.worktree) {
       const sessionOutput = await fetchSessionOutput(v2Client, sessionId, state.worktreeDir, logger)
       const completionTimestamp = new Date()
       
-      logWorktreeCompletion(
+      // Build the completion payload from host project directory context
+      const completionResult = buildWorktreeCompletionPayload(
         getConfig(),
         {
           projectDir: state.projectDir,
@@ -289,10 +375,19 @@ export function createLoopEventHandler(
           worktreeBranch: state.worktreeBranch,
           summary: summaryPromptResult || undefined,
           dataDir,
-          sandboxHostDir: state.worktreeDir,
         },
         logger,
       )
+      
+      if (completionResult) {
+        // Spawn a dedicated host session to write the log
+        await dispatchWorktreeCompletionLogSession(
+          v2Client,
+          completionResult,
+          state.projectDir,
+          logger,
+        )
+      }
     }
 
     if (v2Client.tui) {
@@ -412,16 +507,10 @@ export function createLoopEventHandler(
   async function rotateSession(loopName: string, state: LoopState): Promise<string> {
     const oldSessionId = state.sessionId
 
-    // Resolve log target for permission ruleset (pure, no filesystem mutation)
-    // Use host project directory for path resolution, worktree for sandbox mapping
-    const logTarget = resolveWorktreeLogTarget(getConfig(), {
-      projectDir: state.projectDir,
-      sandboxHostDir: state.worktreeDir,
-      sandbox: state.sandbox,
-      dataDir,
-    }, logger)
+    // Worktree sessions no longer need log directory access since logging is dispatched via host session
+    // Only resolve log target for non-worktree sessions
     const agentExclusions = agents.code.tools?.exclude
-    const permissionRuleset = buildLoopPermissionRuleset(getConfig(), logTarget?.permissionPath ?? null, {
+    const permissionRuleset = buildLoopPermissionRuleset(getConfig(), null, {
       isWorktree: !!state.worktree,
       agentExclusions,
     })

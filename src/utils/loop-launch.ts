@@ -104,17 +104,10 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
     sessionDirectory = worktreeResult.data.directory
     worktreeBranch = worktreeResult.data.branch
     
-    // Get config for permission ruleset
-    // Load actual config to respect worktreeLogging settings
-    const logTarget = resolveWorktreeLogTarget(config, {
-      projectDir: directory,
-      sandboxHostDir: sessionDirectory,
-      sandbox: isSandboxEnabled,
-      dataDir,
-    })
+    // Worktree sessions no longer need log directory access since logging is dispatched via host session
     const agentExclusions = agents.code.tools?.exclude
-    const permissionRuleset = buildLoopPermissionRuleset(config, logTarget?.permissionPath ?? null, {
-      isWorktree: isWorktree,
+    const permissionRuleset = buildLoopPermissionRuleset(config, null, {
+      isWorktree: true,
       agentExclusions,
     })
     
@@ -130,7 +123,7 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
     
     sessionId = createResult.data.id
   } else {
-    // In-place loop - compute permission ruleset with project directory context
+    // In-place loop - may still need log directory access if direct logging is used
     const logTarget = resolveWorktreeLogTarget(config, {
       projectDir: directory,
       sandboxHostDir: undefined,
@@ -139,7 +132,7 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
     })
     const agentExclusions = agents.code.tools?.exclude
     const permissionRuleset = buildLoopPermissionRuleset(config, logTarget?.permissionPath ?? null, {
-      isWorktree: isWorktree,
+      isWorktree: false,
       agentExclusions,
     })
     

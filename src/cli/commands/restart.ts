@@ -6,7 +6,6 @@ import { openDatabase, confirm } from '../utils'
 import { findPartialMatch } from '../../utils/partial-match'
 import { createOpencodeClient } from '@opencode-ai/sdk/v2'
 import { loadPluginConfig } from '../../setup'
-import { resolveWorktreeLogTarget } from '../../services/worktree-log'
 
 export interface RestartArgs {
   dbPath?: string
@@ -196,20 +195,10 @@ export async function run(argv: RestartArgs): Promise<void> {
       }
     }
 
-    // Load config and resolve log target for permission ruleset
-    // For worktree mode, use the host project directory for path resolution
-    // Use resolved runtime data dir instead of config.dataDir
+    // Worktree sessions no longer need log directory access since logging is dispatched via host session
     const config = loadPluginConfig()
-    const { resolveDataDir } = await import('../../storage')
-    const dataDir = resolveDataDir()
-    const logTarget = resolveWorktreeLogTarget(config, {
-      projectDir: state.projectDir || state.worktreeDir,
-      sandboxHostDir: state.worktreeDir,
-      sandbox: state.sandbox,
-      dataDir,
-    }, console)
     const agentExclusions = agents.code.tools?.exclude
-    const permissionRuleset = buildLoopPermissionRuleset(config, logTarget?.permissionPath ?? null, {
+    const permissionRuleset = buildLoopPermissionRuleset(config, null, {
       isWorktree: !!state.worktree,
       agentExclusions,
     })
