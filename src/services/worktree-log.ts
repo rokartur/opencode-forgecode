@@ -1,7 +1,7 @@
 import { mkdirSync, appendFileSync, existsSync } from 'fs'
 import { join, isAbsolute } from 'path'
+import { homedir } from 'os'
 import type { PluginConfig, Logger } from '../types'
-import type { LoopSessionOutput } from './loop'
 import { toContainerPath } from '../sandbox/path'
 
 /**
@@ -35,8 +35,8 @@ export interface WorktreeCompletionLogPayload {
   iteration: number
   /** The worktree branch name, if applicable. */
   worktreeBranch?: string
-  /** Summary of what was accomplished. */
-  summary: string
+  /** The plan text to include in the log entry, if available. */
+  planText?: string | null
 }
 
 /**
@@ -60,6 +60,28 @@ export interface WorktreeLogTarget {
   hostPath: string
   /** The path to use for permission rules (may be container-mapped or null if unreachable). */
   permissionPath: string | null
+}
+
+/**
+ * Normalizes a configured log directory string by expanding home-directory shorthand.
+ * - `~` becomes the current user's home directory
+ * - `~/sub/path` becomes `<homedir>/sub/path`
+ * - Already-absolute paths are returned unchanged
+ * - Ordinary relative paths are returned unchanged (caller resolves against projectDir)
+ */
+function normalizeConfiguredLogDirectory(directory: string): string {
+  // Handle exact `~` or `~/...` forms
+  if (directory === '~') {
+    return homedir()
+  }
+  
+  if (directory.startsWith('~/')) {
+    const relativePath = directory.slice(2)
+    return join(homedir(), relativePath)
+  }
+  
+  // Return unchanged for absolute paths or ordinary relative paths
+  return directory
 }
 
 /**
@@ -90,10 +112,13 @@ export function resolveWorktreeLogTarget(
   }
 
   try {
+    // Normalize tilde expansion before checking absolute/relative
+    const normalizedDirectory = normalizeConfiguredLogDirectory(directory)
+    
     // Resolve relative paths against projectDir, not process.cwd()
-    const resolvedPath = isAbsolute(directory)
-      ? directory
-      : join(context.projectDir, directory)
+    const resolvedPath = isAbsolute(normalizedDirectory)
+      ? normalizedDirectory
+      : join(context.projectDir, normalizedDirectory)
     
     // Compute permission path based on sandbox context
     let permissionPath: string | null
@@ -189,34 +214,12 @@ export function resolveWorktreeLogDirectory(config: PluginConfig, logger?: Logge
   }
 }
 
-/**
- * Generates a summary from LoopSessionOutput.
- * Prefers the last assistant message text, falls back to file change info.
- */
-export function summarizeSessionOutput(output: LoopSessionOutput): string {
-  // Try to get the last assistant message
-  if (output.messages && output.messages.length > 0) {
-    const lastMessage = output.messages[output.messages.length - 1]
-    if (lastMessage.text) {
-      // Extract first line or truncate to reasonable length
-      const firstLine = lastMessage.text.split('\n')[0]
-      return firstLine.length > 200 ? firstLine.substring(0, 197) + '...' : firstLine
-    }
-  }
 
-  // Fall back to file change info
-  if (output.fileChanges) {
-    const { additions, deletions, files } = output.fileChanges
-    return `Modified ${files} file(s): +${additions} -${deletions}`
-  }
-
-  return 'No summary available'
-}
 
 /**
  * Formats a date as YYYY-MM-DD in local timezone.
  */
-function formatDateKey(date: Date): string {
+export function formatDateKey(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -224,10 +227,37 @@ function formatDateKey(date: Date): string {
 }
 
 /**
- * Formats a timestamp for display in the log.
+ * Formats a worktree completion entry with plan-based deterministic formatting.
+ * This is a pure helper for tests and host logging prompts.
  */
-function formatTimestamp(date: Date): string {
-  return date.toISOString()
+export function formatWorktreeCompletionEntry(
+  options: {
+    projectDir: string
+    loopName: string
+    completionTimestamp: Date
+    iteration: number
+    worktreeBranch?: string
+  },
+  planText: string | null,
+): string {
+  const timestamp = options.completionTimestamp.toISOString()
+  const branchInfo = options.worktreeBranch ? `\n- **Branch:** ${options.worktreeBranch}` : ''
+  const planSection = (planText?.trim()) || 'Plan unavailable'
+  
+  return `## ${options.loopName}
+
+- **Original Project:** ${options.projectDir}
+- **Loop:** ${options.loopName}${branchInfo}
+- **Completed:** ${timestamp}
+- **Iteration:** ${options.iteration}
+
+### Plan
+
+${planSection}
+
+---
+
+`
 }
 
 /**
@@ -241,30 +271,17 @@ export function appendWorktreeLogEntry(
     projectDir: string
     loopName: string
     completionTimestamp: Date
-    summary: string
     iteration: number
     worktreeBranch?: string
   },
+  planText?: string | null,
   logger?: Logger,
 ): boolean {
   try {
     const dateKey = formatDateKey(options.completionTimestamp)
     const logFile = join(directory, `${dateKey}.md`)
 
-    const timestamp = formatTimestamp(options.completionTimestamp)
-    const branchInfo = options.worktreeBranch ? `\n- **Branch:** ${options.worktreeBranch}` : ''
-    
-    const entry = `## ${options.loopName}
-
-- **Project:** ${options.projectDir}
-- **Loop:** ${options.loopName}${branchInfo}
-- **Completed:** ${timestamp}
-- **Iteration:** ${options.iteration}
-- **Summary:** ${options.summary}
-
----
-
-`
+    const entry = formatWorktreeCompletionEntry(options, planText ?? null)
 
     appendFileSync(logFile, entry, 'utf-8')
     logger?.debug(`Worktree log: appended entry to ${logFile}`)
@@ -287,10 +304,8 @@ export function buildWorktreeCompletionPayload(
     projectDir: string
     loopName: string
     completionTimestamp: Date
-    sessionOutput: LoopSessionOutput | null
     iteration: number
     worktreeBranch?: string
-    summary?: string
     dataDir?: string
   },
   logger?: Logger,
@@ -311,10 +326,6 @@ export function buildWorktreeCompletionPayload(
     return null
   }
 
-  const summary = options.summary ?? (options.sessionOutput 
-    ? summarizeSessionOutput(options.sessionOutput)
-    : 'No session output available')
-
   const payload: WorktreeCompletionLogPayload = {
     logDirectory: logTarget.hostPath,
     projectDir: options.projectDir,
@@ -322,7 +333,6 @@ export function buildWorktreeCompletionPayload(
     completionTimestamp: options.completionTimestamp.toISOString(),
     iteration: options.iteration,
     worktreeBranch: options.worktreeBranch,
-    summary,
   }
 
   return {
@@ -355,10 +365,10 @@ export function writeWorktreeCompletionLog(
       projectDir: payload.projectDir,
       loopName: payload.loopName,
       completionTimestamp: completionDate,
-      summary: payload.summary,
       iteration: payload.iteration,
       worktreeBranch: payload.worktreeBranch,
     },
+    payload.planText,
     logger,
   )
 }
@@ -376,10 +386,8 @@ export function logWorktreeCompletion(
     projectDir: string
     loopName: string
     completionTimestamp: Date
-    sessionOutput: LoopSessionOutput | null
     iteration: number
     worktreeBranch?: string
-    summary?: string
     dataDir?: string
     sandboxHostDir?: string
   },
@@ -406,20 +414,16 @@ export function logWorktreeCompletion(
     return false
   }
 
-  const summary = options.summary ?? (options.sessionOutput 
-    ? summarizeSessionOutput(options.sessionOutput)
-    : 'No session output available')
-
   return appendWorktreeLogEntry(
     logTarget.hostPath,
     {
       projectDir: options.projectDir,
       loopName: options.loopName,
       completionTimestamp: options.completionTimestamp,
-      summary,
       iteration: options.iteration,
       worktreeBranch: options.worktreeBranch,
     },
+    null,
     logger,
   )
 }

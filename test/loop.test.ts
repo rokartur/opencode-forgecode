@@ -691,15 +691,16 @@ describe('Stall Detection', () => {
     loopService.setState(worktreeName, {
       active: true,
       sessionId,
-      worktreeName,
+      loopName: worktreeName,
       worktreeDir: '/tmp/test',
+      projectDir: '/tmp/test',
       worktreeBranch: 'main',
       iteration: 1,
       maxIterations: 0,
       completionSignal: null,
       startedAt: new Date().toISOString(),
       prompt: 'test',
-      phase: 'coding',
+      phase: 'coding' as const,
       audit: false,
       errorCount: 0,
       auditCount: 0,
@@ -2121,8 +2122,8 @@ describe('migrateRalphKeys', () => {
 
     migrateRalphKeys(kvService, projectId, logger)
 
-    expect(kvService.get(projectId, 'loop:foo')).toEqual({ value: 'bar' })
-    expect(kvService.get(projectId, 'loop:bar')).toEqual({ value: 'baz' })
+    expect(kvService.get<any>(projectId, 'loop:foo')).toEqual({ value: 'bar' })
+    expect(kvService.get<any>(projectId, 'loop:bar')).toEqual({ value: 'baz' })
     expect(kvService.get(projectId, 'ralph:foo')).toBeNull()
     expect(kvService.get(projectId, 'ralph:bar')).toBeNull()
   })
@@ -2156,7 +2157,7 @@ describe('migrateRalphKeys', () => {
 
     migrateRalphKeys(kvService, projectId, logger)
 
-    expect(kvService.get(projectId, 'loop-session:s1')).toBe('worktree-1')
+    expect(kvService.get<string>(projectId, 'loop-session:s1')).toBe('worktree-1')
     expect(kvService.get(projectId, 'ralph-session:s1')).toBeNull()
   })
 
@@ -2626,6 +2627,8 @@ describe('fetchSessionOutput', () => {
   })
 })
 
+
+
 describe('generateUniqueName', () => {
   test('returns base name when no collision exists', () => {
     const result = generateUniqueName('test-name', [])
@@ -2735,3 +2738,567 @@ describe('generateUniqueName', () => {
   })
 })
 
+describe('LoopState completionSummary field', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('LoopState can persist completionSummary field', () => {
+    const state = {
+      active: false,
+      sessionId: 'test-session',
+      loopName: 'test-worktree',
+      worktreeDir: '/tmp/test',
+      projectDir: '/tmp/test',
+      worktreeBranch: 'main',
+      iteration: 1,
+      maxIterations: 5,
+      completionSignal: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      terminationReason: 'completed',
+      completedAt: new Date().toISOString(),
+      worktree: true,
+      completionSummary: '- Objective: Test\n- Implemented: Implementation\n- Verified: Verification',
+    }
+
+    loopService.setState('test-worktree', state)
+    const retrieved = loopService.getAnyState('test-worktree')
+    expect(retrieved).not.toBeNull()
+    expect(retrieved?.completionSummary).toBe('- Objective: Test\n- Implemented: Implementation\n- Verified: Verification')
+  })
+
+  test('LoopState without completionSummary loads normally (backward compatibility)', () => {
+    const state = {
+      active: false,
+      sessionId: 'test-session',
+      loopName: 'test-worktree',
+      worktreeDir: '/tmp/test',
+      projectDir: '/tmp/test',
+      worktreeBranch: 'main',
+      iteration: 1,
+      maxIterations: 5,
+      completionSignal: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      terminationReason: 'completed',
+      completedAt: new Date().toISOString(),
+      worktree: true,
+    }
+
+    loopService.setState('test-worktree', state)
+    const retrieved = loopService.getAnyState('test-worktree')
+    expect(retrieved).not.toBeNull()
+    expect(retrieved?.completionSummary).toBeUndefined()
+  })
+})
+
+describe('worktree completion logging lifecycle', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('completed worktree loop writes log file directly to host path', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const { existsSync, readFileSync, mkdirSync, rmSync } = require('fs')
+    const { join } = require('path')
+    const sessionId = 'complete-session'
+    const logDir = `/tmp/opencode-wt-log-test-${Date.now()}`
+
+    try {
+      mkdirSync(logDir, { recursive: true })
+
+      const mockV2Client = {
+        session: {
+          promptAsync: async () => ({ data: undefined, error: undefined }),
+          messages: async () => ({
+            data: [{
+              info: { role: 'assistant' },
+              parts: [{ type: 'text', text: 'Work finished. ALL_PHASES_COMPLETE' }],
+            }],
+          }),
+          abort: async () => ({ data: undefined, error: undefined }),
+          status: async () => ({ data: {} }),
+        },
+      } as any
+
+      const handler = createLoopEventHandler(
+        loopService,
+        {} as any,
+        mockV2Client,
+        createMockLogger(),
+        () => ({
+          loop: { worktreeLogging: { enabled: true, directory: logDir } },
+          executionModel: undefined,
+          auditorModel: undefined,
+        }),
+      )
+
+      // Store a plan in KV so it gets included in the log
+      kvService.set(projectId, 'plan:test-worktree', 'Phase 1: Build feature\nPhase 2: Add tests')
+
+      loopService.setState('test-worktree', {
+        active: true,
+        sessionId,
+        loopName: 'test-worktree',
+        worktreeDir: '/tmp/worktree',
+        projectDir: '/tmp/project-root',
+        worktreeBranch: 'main',
+        iteration: 1,
+        maxIterations: 5,
+        completionSignal: 'ALL_PHASES_COMPLETE',
+        startedAt: new Date().toISOString(),
+        prompt: 'Test prompt',
+        phase: 'coding',
+        audit: false,
+        errorCount: 0,
+        auditCount: 0,
+        worktree: true,
+      })
+      loopService.registerLoopSession(sessionId, 'test-worktree')
+
+      await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+      // Verify the log file was written
+      const today = new Date()
+      const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      const logFile = join(logDir, `${dateKey}.md`)
+      expect(existsSync(logFile)).toBe(true)
+
+      const content = readFileSync(logFile, 'utf-8')
+      expect(content).toContain('test-worktree')
+      expect(content).toContain('/tmp/project-root')
+      expect(content).toContain('main')
+      expect(content).toContain('Phase 1: Build feature')
+    } finally {
+      rmSync(logDir, { recursive: true, force: true })
+    }
+  })
+
+  test('completed worktree loop skips host logging when disabled', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const sessionId = 'complete-no-log'
+
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({
+          data: [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Done ALL_PHASES_COMPLETE' }] }],
+        }),
+        abort: async () => ({ data: undefined, error: undefined }),
+        status: async () => ({ data: {} }),
+      },
+    } as any
+
+    const handler = createLoopEventHandler(
+      loopService,
+      {} as any,
+      mockV2Client,
+      createMockLogger(),
+      () => ({ loop: { worktreeLogging: { enabled: false, directory: 'logs' } } }),
+    )
+
+    loopService.setState('test-worktree', {
+      active: true,
+      sessionId,
+      loopName: 'test-worktree',
+      worktreeDir: '/tmp/worktree',
+      projectDir: '/tmp/project-root',
+      worktreeBranch: 'main',
+      iteration: 1,
+      maxIterations: 5,
+      completionSignal: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      worktree: true,
+    })
+    loopService.registerLoopSession(sessionId, 'test-worktree')
+
+    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+    expect(loopService.getAnyState('test-worktree')?.active).toBe(false)
+  })
+
+  test('completed worktree loop still terminates when log write fails', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const sessionId = 'complete-log-failure'
+
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({
+          data: [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Done ALL_PHASES_COMPLETE' }] }],
+        }),
+        abort: async () => ({ data: undefined, error: undefined }),
+        status: async () => ({ data: {} }),
+      },
+    } as any
+
+    const handler = createLoopEventHandler(
+      loopService,
+      {} as any,
+      mockV2Client,
+      createMockLogger(),
+      () => ({ loop: { worktreeLogging: { enabled: true, directory: '/nonexistent/readonly/logs' } } }),
+    )
+
+    loopService.setState('test-worktree', {
+      active: true,
+      sessionId,
+      loopName: 'test-worktree',
+      worktreeDir: '/tmp/worktree',
+      projectDir: '/tmp/project-root',
+      worktreeBranch: 'main',
+      iteration: 1,
+      maxIterations: 5,
+      completionSignal: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      worktree: true,
+    })
+    loopService.registerLoopSession(sessionId, 'test-worktree')
+
+    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+    const finalState = loopService.getAnyState('test-worktree')
+    expect(finalState?.active).toBe(false)
+    expect(finalState?.terminationReason).toBe('completed')
+  })
+
+  test('loop still completes when log directory is not writable', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const sessionId = 'complete-log-prompt-failure'
+
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({ data: [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Done ALL_PHASES_COMPLETE' }] }] }),
+        abort: async () => ({ data: undefined, error: undefined }),
+        status: async () => ({ data: {} }),
+      },
+    } as any
+
+    const handler = createLoopEventHandler(
+      loopService,
+      {} as any,
+      mockV2Client,
+      createMockLogger(),
+      () => ({ loop: { worktreeLogging: { enabled: true, directory: '/nonexistent/readonly/path/logs' } } }),
+    )
+
+    loopService.setState('test-worktree', {
+      active: true,
+      sessionId,
+      loopName: 'test-worktree',
+      worktreeDir: '/tmp/worktree',
+      projectDir: '/tmp/project-root',
+      worktreeBranch: 'main',
+      iteration: 1,
+      maxIterations: 5,
+      completionSignal: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      worktree: true,
+    })
+    loopService.registerLoopSession(sessionId, 'test-worktree')
+
+    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+    expect(loopService.getAnyState('test-worktree')?.active).toBe(false)
+    expect(loopService.getAnyState('test-worktree')?.terminationReason).toBe('completed')
+  })
+
+  test('completed worktree loop does not persist completionSummary', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const sessionId = 'complete-no-summary'
+
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({
+          data: [{
+            info: { role: 'assistant' },
+            parts: [{ type: 'text', text: 'Done ALL_PHASES_COMPLETE' }],
+          }],
+        }),
+        abort: async () => ({ data: undefined, error: undefined }),
+        status: async () => ({ data: {} }),
+      },
+    } as any
+
+    const handler = createLoopEventHandler(
+      loopService,
+      {} as any,
+      mockV2Client,
+      createMockLogger(),
+      () => ({ loop: { worktreeLogging: { enabled: true, directory: 'logs' } } }),
+    )
+
+    loopService.setState('test-worktree', {
+      active: true,
+      sessionId,
+      loopName: 'test-worktree',
+      worktreeDir: '/tmp/worktree',
+      projectDir: '/tmp/project-root',
+      worktreeBranch: 'main',
+      iteration: 1,
+      maxIterations: 5,
+      completionSignal: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      worktree: true,
+    })
+    loopService.registerLoopSession(sessionId, 'test-worktree')
+
+    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+    const finalState = loopService.getAnyState('test-worktree')
+    expect(finalState?.active).toBe(false)
+    expect(finalState?.completionSummary).toBeUndefined()
+  })
+
+  test('log entry uses plan unavailable when no plan is stored', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const { existsSync, readFileSync, mkdirSync, rmSync } = require('fs')
+    const { join } = require('path')
+    const sessionId = 'complete-host-no-plan'
+    const logDir = `/tmp/opencode-wt-log-test-noplan-${Date.now()}`
+
+    try {
+      mkdirSync(logDir, { recursive: true })
+
+      const mockV2Client = {
+        session: {
+          promptAsync: async () => ({ data: undefined, error: undefined }),
+          messages: async () => ({
+            data: [{
+              info: { role: 'assistant' },
+              parts: [{ type: 'text', text: 'Done ALL_PHASES_COMPLETE' }],
+            }],
+          }),
+          abort: async () => ({ data: undefined, error: undefined }),
+          status: async () => ({ data: {} }),
+        },
+      } as any
+
+      const handler = createLoopEventHandler(
+        loopService,
+        {} as any,
+        mockV2Client,
+        createMockLogger(),
+        () => ({ loop: { worktreeLogging: { enabled: true, directory: logDir } } }),
+      )
+
+      loopService.setState('test-worktree', {
+        active: true,
+        sessionId,
+        loopName: 'test-worktree',
+        worktreeDir: '/tmp/worktree',
+        projectDir: '/tmp/project-root',
+        worktreeBranch: 'main',
+        iteration: 1,
+        maxIterations: 5,
+        completionSignal: 'ALL_PHASES_COMPLETE',
+        startedAt: new Date().toISOString(),
+        prompt: 'Test prompt',
+        phase: 'coding',
+        audit: false,
+        errorCount: 0,
+        auditCount: 0,
+        worktree: true,
+      })
+      loopService.registerLoopSession(sessionId, 'test-worktree')
+
+      await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+      const finalState = loopService.getAnyState('test-worktree')
+      expect(finalState?.active).toBe(false)
+      expect(finalState?.terminationReason).toBe('completed')
+
+      const today = new Date()
+      const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      const logFile = join(logDir, `${dateKey}.md`)
+      expect(existsSync(logFile)).toBe(true)
+
+      const content = readFileSync(logFile, 'utf-8')
+      expect(content).toContain('Plan unavailable')
+    } finally {
+      rmSync(logDir, { recursive: true, force: true })
+    }
+  })
+
+  test('log entry includes plan text from KV store', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const { existsSync, readFileSync, mkdirSync, rmSync } = require('fs')
+    const { join } = require('path')
+    const sessionId = 'complete-plan-from-kv'
+    const logDir = `/tmp/opencode-wt-log-test-plan-${Date.now()}`
+
+    try {
+      mkdirSync(logDir, { recursive: true })
+
+      const mockV2Client = {
+        session: {
+          promptAsync: async () => ({ data: undefined, error: undefined }),
+          messages: async () => ({
+            data: [{
+              info: { role: 'assistant' },
+              parts: [{ type: 'text', text: 'Done ALL_PHASES_COMPLETE' }],
+            }],
+          }),
+          abort: async () => ({ data: undefined, error: undefined }),
+          status: async () => ({ data: {} }),
+        },
+      } as any
+
+      const handler = createLoopEventHandler(
+        loopService,
+        {} as any,
+        mockV2Client,
+        createMockLogger(),
+        () => ({ loop: { worktreeLogging: { enabled: true, directory: logDir } } }),
+      )
+
+      kvService.set(projectId, 'plan:test-worktree', '## Phase 1\nImplement the widget\n## Phase 2\nWrite tests')
+
+      loopService.setState('test-worktree', {
+        active: true,
+        sessionId,
+        loopName: 'test-worktree',
+        worktreeDir: '/tmp/worktree',
+        projectDir: '/tmp/project-root',
+        worktreeBranch: 'main',
+        iteration: 1,
+        maxIterations: 5,
+        completionSignal: 'ALL_PHASES_COMPLETE',
+        startedAt: new Date().toISOString(),
+        prompt: 'Test prompt',
+        phase: 'coding',
+        audit: false,
+        errorCount: 0,
+        auditCount: 0,
+        worktree: true,
+      })
+      loopService.registerLoopSession(sessionId, 'test-worktree')
+
+      await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+      const today = new Date()
+      const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      const logFile = join(logDir, `${dateKey}.md`)
+      expect(existsSync(logFile)).toBe(true)
+
+      const content = readFileSync(logFile, 'utf-8')
+      expect(content).toContain('Implement the widget')
+      expect(content).toContain('Write tests')
+      expect(content).not.toContain('Plan unavailable')
+    } finally {
+      rmSync(logDir, { recursive: true, force: true })
+    }
+  })
+
+  test('write failure does not create host sessions', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const sessionId = 'complete-create-failure'
+    let createCalls = 0
+
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({
+          data: [{
+            info: { role: 'assistant' },
+            parts: [{ type: 'text', text: 'Done ALL_PHASES_COMPLETE' }],
+          }],
+        }),
+        create: async () => {
+          createCalls += 1
+          return { data: { id: 'unexpected-session' }, error: undefined }
+        },
+        abort: async () => ({ data: undefined, error: undefined }),
+        status: async () => ({ data: {} }),
+        delete: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const handler = createLoopEventHandler(
+      loopService,
+      {} as any,
+      mockV2Client,
+      createMockLogger(),
+      () => ({ loop: { worktreeLogging: { enabled: true, directory: '/nonexistent/readonly/logs' } } }),
+    )
+
+    loopService.setState('test-worktree', {
+      active: true,
+      sessionId,
+      loopName: 'test-worktree',
+      worktreeDir: '/tmp/worktree',
+      projectDir: '/tmp/project-root',
+      worktreeBranch: 'main',
+      iteration: 1,
+      maxIterations: 5,
+      completionSignal: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      worktree: true,
+    })
+    loopService.registerLoopSession(sessionId, 'test-worktree')
+
+    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+
+    expect(createCalls).toBe(0)
+    expect(loopService.getAnyState('test-worktree')?.active).toBe(false)
+    expect(loopService.getAnyState('test-worktree')?.terminationReason).toBe('completed')
+  })
+})

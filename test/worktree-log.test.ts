@@ -6,11 +6,11 @@ import {
   resolveWorktreeLogDirectory,
   resolveWorktreeLogTarget,
   ensureWorktreeLogDirectory,
-  summarizeSessionOutput,
   appendWorktreeLogEntry,
   logWorktreeCompletion,
   buildWorktreeCompletionPayload,
   writeWorktreeCompletionLog,
+  formatWorktreeCompletionEntry,
 } from '../src/services/worktree-log'
 import { buildLoopPermissionRuleset } from '../src/constants/loop'
 import type { LoopSessionOutput } from '../src/services/loop'
@@ -178,6 +178,99 @@ describe('resolveWorktreeLogTarget', () => {
     // Path outside mount should be null to prevent granting meaningless host-only rules
     expect(result!.permissionPath).toBeNull()
   })
+
+  test('expands tilde shorthand to home directory', () => {
+    const { homedir } = require('os')
+    const config: PluginConfig = {
+      loop: {
+        worktreeLogging: {
+          enabled: true,
+          directory: '~/Documents/Obsidian/GFPRO/Plans',
+        },
+      },
+    }
+
+    const result = resolveWorktreeLogTarget(config, { projectDir: testProjectDir })
+    expect(result).not.toBeNull()
+    expect(result!.hostPath).toBe(join(homedir(), 'Documents/Obsidian/GFPRO/Plans'))
+    expect(result!.hostPath).not.toBe(join(testProjectDir, '~/Documents/Obsidian/GFPRO/Plans'))
+  })
+
+  test('expands bare tilde to home directory', () => {
+    const { homedir } = require('os')
+    const config: PluginConfig = {
+      loop: {
+        worktreeLogging: {
+          enabled: true,
+          directory: '~',
+        },
+      },
+    }
+
+    const result = resolveWorktreeLogTarget(config, { projectDir: testProjectDir })
+    expect(result).not.toBeNull()
+    expect(result!.hostPath).toBe(homedir())
+  })
+
+  test('preserves already-absolute paths unchanged', () => {
+    const absolutePath = '/tmp/absolute-logs'
+    const config: PluginConfig = {
+      loop: {
+        worktreeLogging: {
+          enabled: true,
+          directory: absolutePath,
+        },
+      },
+    }
+
+    const result = resolveWorktreeLogTarget(config, { projectDir: testProjectDir })
+    expect(result).not.toBeNull()
+    expect(result!.hostPath).toBe(absolutePath)
+  })
+
+  test('preserves ordinary relative paths against projectDir', () => {
+    const config: PluginConfig = {
+      loop: {
+        worktreeLogging: {
+          enabled: true,
+          directory: 'logs/worktree',
+        },
+      },
+    }
+
+    const result = resolveWorktreeLogTarget(config, { projectDir: testProjectDir })
+    expect(result).not.toBeNull()
+    expect(result!.hostPath).toBe(join(testProjectDir, 'logs/worktree'))
+  })
+
+  test('computes permissionPath from normalized host path for sandbox mapping', () => {
+    const { homedir } = require('os')
+    const tildePath = '~/sandbox-logs'
+    const config: PluginConfig = {
+      loop: {
+        worktreeLogging: {
+          enabled: true,
+          directory: tildePath,
+        },
+      },
+    }
+
+    const worktreeDir = join(testProjectDir, 'worktree')
+    mkdirSync(worktreeDir, { recursive: true })
+    
+    // When tilde path resolves to a location within the sandbox mount
+    const result = resolveWorktreeLogTarget(config, { 
+      projectDir: worktreeDir,
+      sandboxHostDir: worktreeDir,
+      sandbox: true,
+    })
+    
+    // The hostPath should be expanded
+    expect(result).not.toBeNull()
+    expect(result!.hostPath).toBe(join(homedir(), 'sandbox-logs'))
+    // Permission path should be null since homedir is outside sandbox mount
+    expect(result!.permissionPath).toBeNull()
+  })
 })
 
 describe('ensureWorktreeLogDirectory', () => {
@@ -318,74 +411,7 @@ describe('resolveWorktreeLogDirectory', () => {
   })
 })
 
-describe('summarizeSessionOutput', () => {
-  test('prefers last assistant message text', () => {
-    const output: LoopSessionOutput = {
-      messages: [
-        {
-          text: 'First message',
-          cost: 0.001,
-          tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-        {
-          text: 'Last message with important content',
-          cost: 0.002,
-          tokens: { input: 200, output: 100, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-      ],
-      totalCost: 0.003,
-      totalTokens: { input: 300, output: 150, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: { additions: 10, deletions: 5, files: 3 },
-    }
 
-    const summary = summarizeSessionOutput(output)
-    expect(summary).toBe('Last message with important content')
-  })
-
-  test('truncates long summaries', () => {
-    const longText = 'A'.repeat(250)
-    const output: LoopSessionOutput = {
-      messages: [
-        {
-          text: longText,
-          cost: 0.001,
-          tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-      ],
-      totalCost: 0.001,
-      totalTokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: null,
-    }
-
-    const summary = summarizeSessionOutput(output)
-    expect(summary.length).toBe(200)
-    expect(summary).toBe('A'.repeat(197) + '...')
-  })
-
-  test('falls back to file change info when no messages', () => {
-    const output: LoopSessionOutput = {
-      messages: [],
-      totalCost: 0,
-      totalTokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: { additions: 15, deletions: 3, files: 5 },
-    }
-
-    const summary = summarizeSessionOutput(output)
-    expect(summary).toBe('Modified 5 file(s): +15 -3')
-  })
-
-  test('returns fallback when no data available', () => {
-    const output: LoopSessionOutput = {
-      messages: [{ text: '', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 } }],
-      totalCost: 0,
-      totalTokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: null,
-    }
-
-    const summary = summarizeSessionOutput(output)
-    expect(summary).toBe('No summary available')
-  })
-})
 
 describe('appendWorktreeLogEntry', () => {
   let testLogDir: string
@@ -401,13 +427,12 @@ describe('appendWorktreeLogEntry', () => {
     }
   })
 
-  test('creates dated file and appends entry', () => {
+  test('creates dated file and appends entry with plan-based format', () => {
     const timestamp = new Date('2024-01-15T10:30:00Z')
     const options = {
       projectDir: '/path/to/project',
       loopName: 'test-loop',
       completionTimestamp: timestamp,
-      summary: 'Test summary',
       iteration: 3,
       worktreeBranch: 'worktree/test-loop',
     }
@@ -420,12 +445,30 @@ describe('appendWorktreeLogEntry', () => {
 
     const content = readFileSync(expectedFile, 'utf-8')
     expect(content).toContain('## test-loop')
-    expect(content).toContain('**Project:** /path/to/project')
+    expect(content).toContain('**Original Project:** /path/to/project')
     expect(content).toContain('**Loop:** test-loop')
     expect(content).toContain('**Branch:** worktree/test-loop')
     expect(content).toContain('2024-01-15T10:30:00.000Z')
     expect(content).toContain('**Iteration:** 3')
-    expect(content).toContain('**Summary:** Test summary')
+    expect(content).toContain('### Plan')
+    expect(content).toContain('Plan unavailable')
+  })
+
+  test('renders Plan unavailable for whitespace-only planText', () => {
+    const timestamp = new Date('2024-01-15T10:30:00Z')
+    const options = {
+      projectDir: '/path/to/project',
+      loopName: 'test-loop',
+      completionTimestamp: timestamp,
+      iteration: 1,
+    }
+
+    const result = appendWorktreeLogEntry(testLogDir, options, '   ')
+    expect(result).toBe(true)
+
+    const expectedFile = join(testLogDir, '2024-01-15.md')
+    const content = readFileSync(expectedFile, 'utf-8')
+    expect(content).toContain('Plan unavailable')
   })
 
   test('appends second entry instead of overwriting', () => {
@@ -436,7 +479,6 @@ describe('appendWorktreeLogEntry', () => {
       projectDir: '/path/to/project',
       loopName: 'first-loop',
       completionTimestamp: timestamp1,
-      summary: 'First summary',
       iteration: 1,
     }
 
@@ -444,7 +486,6 @@ describe('appendWorktreeLogEntry', () => {
       projectDir: '/path/to/project',
       loopName: 'second-loop',
       completionTimestamp: timestamp2,
-      summary: 'Second summary',
       iteration: 2,
     }
 
@@ -465,7 +506,6 @@ describe('appendWorktreeLogEntry', () => {
       projectDir: '/path/to/project',
       loopName: 'test-loop',
       completionTimestamp: timestamp,
-      summary: 'Test summary',
       iteration: 1,
     }
 
@@ -474,7 +514,7 @@ describe('appendWorktreeLogEntry', () => {
 
     const expectedFile = join(testLogDir, '2024-01-15.md')
     const content = readFileSync(expectedFile, 'utf-8')
-    expect(content).not.toContain('**Branch:**')
+    expect(content).not.toContain('**Branch:')
   })
 
   test('fails closed on unwritable directory', () => {
@@ -483,7 +523,6 @@ describe('appendWorktreeLogEntry', () => {
       projectDir: '/path/to/project',
       loopName: 'test-loop',
       completionTimestamp: timestamp,
-      summary: 'Test summary',
       iteration: 1,
     }
 
@@ -520,7 +559,6 @@ describe('logWorktreeCompletion', () => {
       projectDir: '/project',
       loopName: 'test',
       completionTimestamp: new Date(),
-      sessionOutput: null,
       iteration: 1,
     })
 
@@ -537,25 +575,11 @@ describe('logWorktreeCompletion', () => {
       },
     }
 
-    const sessionOutput: LoopSessionOutput = {
-      messages: [
-        {
-          text: 'Implementation complete',
-          cost: 0.001,
-          tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-      ],
-      totalCost: 0.001,
-      totalTokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: { additions: 5, deletions: 2, files: 2 },
-    }
-
     const timestamp = new Date('2024-01-15T10:30:00Z')
     const result = logWorktreeCompletion(config, {
       projectDir: '/path/to/project',
       loopName: 'feature-loop',
       completionTimestamp: timestamp,
-      sessionOutput,
       iteration: 5,
       worktreeBranch: 'worktree/feature-loop',
     })
@@ -567,11 +591,11 @@ describe('logWorktreeCompletion', () => {
 
     const content = readFileSync(expectedFile, 'utf-8')
     expect(content).toContain('## feature-loop')
-    expect(content).toContain('**Project:** /path/to/project')
-    expect(content).toContain('**Summary:** Implementation complete')
+    expect(content).toContain('**Original Project:** /path/to/project')
+    expect(content).toContain('### Plan')
   })
 
-  test('handles null sessionOutput gracefully', () => {
+  test('handles missing sessionOutput fields gracefully', () => {
     const config: PluginConfig = {
       loop: {
         worktreeLogging: {
@@ -585,7 +609,6 @@ describe('logWorktreeCompletion', () => {
       projectDir: '/path/to/project',
       loopName: 'test-loop',
       completionTimestamp: new Date(),
-      sessionOutput: null,
       iteration: 1,
     })
 
@@ -678,19 +701,6 @@ describe('worktree log runtime wiring', () => {
       },
     }
 
-    const sessionOutput: LoopSessionOutput = {
-      messages: [
-        {
-          text: 'Implementation complete',
-          cost: 0.001,
-          tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-      ],
-      totalCost: 0.001,
-      totalTokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: { additions: 5, deletions: 2, files: 2 },
-    }
-
     const timestamp = new Date('2024-01-15T10:30:00Z')
 
     // Simulate completed worktree loop - should log
@@ -698,7 +708,6 @@ describe('worktree log runtime wiring', () => {
       projectDir: '/path/to/project',
       loopName: 'feature-loop',
       completionTimestamp: timestamp,
-      sessionOutput,
       iteration: 5,
       worktreeBranch: 'worktree/feature-loop',
     })
@@ -728,7 +737,6 @@ describe('worktree log runtime wiring', () => {
       projectDir: '/path/to/project',
       loopName: 'cancelled-loop',
       completionTimestamp: timestamp,
-      sessionOutput: null,
       iteration: 3,
       worktreeBranch: 'worktree/cancelled-loop',
     })
@@ -753,7 +761,6 @@ describe('worktree log runtime wiring', () => {
       projectDir: '/path/to/project',
       loopName: 'disabled-loop',
       completionTimestamp: timestamp,
-      sessionOutput: null,
       iteration: 1,
     })
 
@@ -955,7 +962,6 @@ describe('buildWorktreeCompletionPayload', () => {
       projectDir: testProjectDir,
       loopName: 'test-loop',
       completionTimestamp: new Date(),
-      sessionOutput: null,
       iteration: 1,
     })
 
@@ -976,7 +982,6 @@ describe('buildWorktreeCompletionPayload', () => {
       projectDir: testProjectDir,
       loopName: 'test-loop',
       completionTimestamp: new Date(),
-      sessionOutput: null,
       iteration: 1,
     })
 
@@ -994,27 +999,13 @@ describe('buildWorktreeCompletionPayload', () => {
     }
 
     const timestamp = new Date('2024-01-15T10:30:00Z')
-    const sessionOutput: LoopSessionOutput = {
-      messages: [
-        {
-          text: 'Implementation complete',
-          cost: 0.001,
-          tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-      ],
-      totalCost: 0.001,
-      totalTokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: { additions: 5, deletions: 2, files: 2 },
-    }
 
     const result = buildWorktreeCompletionPayload(config, {
       projectDir: testProjectDir,
       loopName: 'feature-loop',
       completionTimestamp: timestamp,
-      sessionOutput,
       iteration: 5,
       worktreeBranch: 'worktree/feature-loop',
-      summary: 'Custom summary',
     })
 
     expect(result).not.toBeNull()
@@ -1025,66 +1016,8 @@ describe('buildWorktreeCompletionPayload', () => {
       completionTimestamp: '2024-01-15T10:30:00.000Z',
       iteration: 5,
       worktreeBranch: 'worktree/feature-loop',
-      summary: 'Custom summary',
     })
     expect(result!.hostPath).toBe(result!.payload.logDirectory)
-  })
-
-  test('uses summary from sessionOutput when not provided', () => {
-    const config: PluginConfig = {
-      loop: {
-        worktreeLogging: {
-          enabled: true,
-          directory: testLogDir,
-        },
-      },
-    }
-
-    const sessionOutput: LoopSessionOutput = {
-      messages: [
-        {
-          text: 'Auto-generated summary',
-          cost: 0.001,
-          tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-      ],
-      totalCost: 0.001,
-      totalTokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
-      fileChanges: null,
-    }
-
-    const result = buildWorktreeCompletionPayload(config, {
-      projectDir: testProjectDir,
-      loopName: 'test-loop',
-      completionTimestamp: new Date(),
-      sessionOutput,
-      iteration: 1,
-    })
-
-    expect(result).not.toBeNull()
-    expect(result!.payload.summary).toBe('Auto-generated summary')
-  })
-
-  test('handles null sessionOutput gracefully', () => {
-    const config: PluginConfig = {
-      loop: {
-        worktreeLogging: {
-          enabled: true,
-          directory: testLogDir,
-        },
-      },
-    }
-
-    const result = buildWorktreeCompletionPayload(config, {
-      projectDir: testProjectDir,
-      loopName: 'test-loop',
-      completionTimestamp: new Date(),
-      sessionOutput: null,
-      iteration: 1,
-    })
-
-    expect(result).not.toBeNull()
-    expect(result!.payload.summary).toBe('No session output available')
   })
 
   test('payload is serializable without worktree session access', () => {
@@ -1102,10 +1035,8 @@ describe('buildWorktreeCompletionPayload', () => {
       projectDir: testProjectDir,
       loopName: 'test-loop',
       completionTimestamp: timestamp,
-      sessionOutput: null,
       iteration: 3,
       worktreeBranch: 'worktree/test',
-      summary: 'Test summary',
     })
 
     expect(result).not.toBeNull()
@@ -1114,7 +1045,6 @@ describe('buildWorktreeCompletionPayload', () => {
     const serialized = JSON.stringify(result!.payload)
     expect(serialized).toContain('test-loop')
     expect(serialized).toContain('2024-01-15T10:30:00.000Z')
-    expect(serialized).toContain('Test summary')
     
     // Verify deserialized payload has all required fields
     const deserialized = JSON.parse(serialized)
@@ -1147,7 +1077,6 @@ describe('writeWorktreeCompletionLog', () => {
       completionTimestamp: timestamp.toISOString(),
       iteration: 5,
       worktreeBranch: 'worktree/test-loop',
-      summary: 'Test summary from payload',
     }
 
     const result = writeWorktreeCompletionLog(payload)
@@ -1158,12 +1087,13 @@ describe('writeWorktreeCompletionLog', () => {
 
     const content = readFileSync(expectedFile, 'utf-8')
     expect(content).toContain('## test-loop')
-    expect(content).toContain('**Project:** /path/to/project')
+    expect(content).toContain('**Original Project:** /path/to/project')
     expect(content).toContain('**Loop:** test-loop')
     expect(content).toContain('**Branch:** worktree/test-loop')
     expect(content).toContain('2024-01-15T10:30:00.000Z')
     expect(content).toContain('**Iteration:** 5')
-    expect(content).toContain('**Summary:** Test summary from payload')
+    expect(content).toContain('### Plan')
+    expect(content).toContain('Plan unavailable')
   })
 
   test('handles missing worktreeBranch in payload', () => {
@@ -1174,7 +1104,6 @@ describe('writeWorktreeCompletionLog', () => {
       loopName: 'test-loop',
       completionTimestamp: timestamp.toISOString(),
       iteration: 1,
-      summary: 'Test summary',
     }
 
     const result = writeWorktreeCompletionLog(payload)
@@ -1182,7 +1111,7 @@ describe('writeWorktreeCompletionLog', () => {
 
     const expectedFile = join(testLogDir, '2024-01-15.md')
     const content = readFileSync(expectedFile, 'utf-8')
-    expect(content).not.toContain('**Branch:**')
+    expect(content).not.toContain('**Branch:')
   })
 
   test('returns false when directory is unwritable', () => {
@@ -1192,7 +1121,6 @@ describe('writeWorktreeCompletionLog', () => {
       loopName: 'test-loop',
       completionTimestamp: new Date().toISOString(),
       iteration: 1,
-      summary: 'Test summary',
     }
 
     const result = writeWorktreeCompletionLog(payload)
@@ -1209,7 +1137,6 @@ describe('writeWorktreeCompletionLog', () => {
       loopName: 'first-loop',
       completionTimestamp: timestamp1.toISOString(),
       iteration: 1,
-      summary: 'First summary',
     }
 
     const payload2 = {
@@ -1218,7 +1145,6 @@ describe('writeWorktreeCompletionLog', () => {
       loopName: 'second-loop',
       completionTimestamp: timestamp2.toISOString(),
       iteration: 2,
-      summary: 'Second summary',
     }
 
     writeWorktreeCompletionLog(payload1)

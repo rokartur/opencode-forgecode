@@ -52,7 +52,7 @@ export interface LoopState {
   sessionId: string
   loopName: string
   worktreeDir: string
-  projectDir: string
+  projectDir?: string
   worktreeBranch?: string
   iteration: number
   maxIterations: number
@@ -70,6 +70,7 @@ export interface LoopState {
   modelFailed?: boolean
   sandbox?: boolean
   sandboxContainerName?: string
+  completionSummary?: string
 }
 
 export interface LoopService {
@@ -192,6 +193,13 @@ export interface LoopService {
    * @returns A unique loop name.
    */
   generateUniqueLoopName(baseName: string): string
+  /**
+   * Gets the plan text for a loop by name or session ID.
+   * @param loopName - The loop name.
+   * @param sessionId - The session ID.
+   * @returns The plan text or null.
+   */
+  getPlanText(loopName: string, sessionId: string): string | null
 }
 
 /**
@@ -297,9 +305,15 @@ export function createLoopService(
     return prompt
   }
 
-  function getPlanText(state: LoopState): string | null {
+  function getPlanTextForState(state: LoopState): string | null {
     return kvService.get<string>(projectId, `plan:${state.loopName}`)
       ?? kvService.get<string>(projectId, `plan:${state.sessionId}`)
+      ?? null
+  }
+
+  function getPlanText(loopName: string, sessionId: string): string | null {
+    return kvService.get<string>(projectId, `plan:${loopName}`)
+      ?? kvService.get<string>(projectId, `plan:${sessionId}`)
       ?? null
   }
 
@@ -324,7 +338,7 @@ export function createLoopService(
 
   function buildAuditPrompt(state: LoopState): string {
     const branchInfo = state.worktreeBranch ? ` (branch: ${state.worktreeBranch})` : ''
-    const planText = getPlanText(state) ?? 'Plan not found in plan store.'
+    const planText = getPlanTextForState(state) ?? 'Plan not found in plan store.'
     const reviewFindings = formatReviewFindings(state.worktreeBranch)
 
     return [
@@ -461,6 +475,7 @@ export function createLoopService(
     hasOutstandingFindings,
     getOutstandingFindings,
     generateUniqueLoopName,
+    getPlanText,
   }
 }
 

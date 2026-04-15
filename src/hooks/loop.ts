@@ -1,14 +1,14 @@
 import type { PluginInput } from '@opencode-ai/plugin'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { LoopService, LoopState } from '../services/loop'
-import { MAX_RETRIES, MAX_CONSECUTIVE_STALLS, fetchSessionOutput } from '../services/loop'
+import { MAX_RETRIES, MAX_CONSECUTIVE_STALLS } from '../services/loop'
 import type { Logger, PluginConfig } from '../types'
 import { retryWithModelFallback } from '../utils/model-fallback'
 import { resolveLoopModel } from '../utils/loop-helpers'
 import { execSync, spawnSync } from 'child_process'
 import { resolve } from 'path'
 import type { createSandboxManager } from '../sandbox/manager'
-import { buildWorktreeCompletionPayload, type BuildWorktreeCompletionPayloadResult } from '../services/worktree-log'
+import { buildWorktreeCompletionPayload, writeWorktreeCompletionLog } from '../services/worktree-log'
 import { buildLoopPermissionRuleset } from '../constants/loop'
 import { agents } from '../agents'
 
@@ -20,6 +20,8 @@ export interface LoopEventHandler {
   getStallInfo(loopName: string): { consecutiveStalls: number; lastActivityTime: number } | null
   cancelBySessionId(sessionId: string): Promise<boolean>
 }
+
+
 
 export function createLoopEventHandler(
   loopService: LoopService,
@@ -214,92 +216,9 @@ export function createLoopEventHandler(
     }
   }
 
-  /**
-   * Spawns a dedicated host session to write worktree completion logs.
-   * This avoids permission issues by running in the host context rather than the worktree sandbox.
-   */
-  async function dispatchWorktreeCompletionLogSession(
-    client: OpencodeClient,
-    completionResult: BuildWorktreeCompletionPayloadResult,
-    hostProjectDir: string,
-    sessionLogger: Logger,
-  ): Promise<void> {
-    try {
-      // Create a minimal permission ruleset for the host logging session
-      // Only needs access to the log directory
-      const loggingPermissionRules = [
-        { permission: 'external_directory', pattern: completionResult.hostPath, action: 'allow' as const },
-      ]
-
-      // Create host session rooted at project directory
-      const createResult = await client.session.create({
-        title: `Log: ${completionResult.payload.loopName}`,
-        directory: hostProjectDir,
-        permission: loggingPermissionRules,
-      })
-
-      if (createResult.error || !createResult.data) {
-        sessionLogger.error(`Loop: failed to create host logging session: ${createResult.error}`)
-        return
-      }
-
-      const hostSessionId = createResult.data.id
-
-      // Build the logging prompt with explicit structured data
-      const payload = completionResult.payload
-      const loggingPrompt = `You are a logging agent. Write a single completion log entry to the file system.
-
-**Instructions:**
-1. Write exactly ONE markdown entry to the log file at: ${payload.logDirectory}
-2. Use the following structured data:
-
-\`\`\`json
-{
-  "loopName": "${payload.loopName}",
-  "projectDir": "${payload.projectDir}",
-  "completionTimestamp": "${payload.completionTimestamp}",
-  "iteration": ${payload.iteration},
-  "worktreeBranch": "${payload.worktreeBranch || 'N/A'}",
-  "summary": "${payload.summary.replace(/"/g, '\\"')}"
-}
-\`\`\`
-
-3. The log file should be named: ${payload.completionTimestamp.split('T')[0]}.md
-4. Append the entry in this exact format:
-
-## ${payload.loopName}
-
-- **Project:** ${payload.projectDir}
-- **Loop:** ${payload.loopName}${payload.worktreeBranch ? `\n- **Branch:** ${payload.worktreeBranch}` : ''}
-- **Completed:** ${payload.completionTimestamp}
-- **Iteration:** ${payload.iteration}
-- **Summary:** ${payload.summary}
-
----
-
-5. After writing the log entry, stop. Do not perform any other actions.`
-
-      // Prompt the host session to write the log
-      const promptResult = await client.session.promptAsync({
-        sessionID: hostSessionId,
-        directory: hostProjectDir,
-        parts: [{ type: 'text' as const, text: loggingPrompt }],
-      })
-
-      // Check for prompt errors and log them explicitly
-      if (promptResult.error) {
-        sessionLogger.error(`Loop: host logging session prompt failed: ${promptResult.error}`)
-      } else {
-        sessionLogger.debug(`Loop: dispatched completion log to host session ${hostSessionId}`)
-      }
-    } catch (err) {
-      sessionLogger.error(`Loop: failed to dispatch host logging session`, err)
-      // Non-fatal: continue with normal loop cleanup even if logging fails
-    }
-  }
-
   async function terminateLoop(loopName: string, state: LoopState, reason: string): Promise<void> {
     const sessionId = state.sessionId
+    const projectDir = state.projectDir ?? state.worktreeDir
     stopWatchdog(loopName)
 
     const retryTimeout = retryTimeouts.get(loopName)
@@ -317,38 +236,6 @@ export function createLoopEventHandler(
       terminationReason: reason,
     })
 
-    // Request a summary of what was accomplished before terminating the session
-    let summaryPromptResult: string | null = null
-    if (reason === 'completed' && state.worktree) {
-      try {
-        logger.log(`Loop: requesting completion summary for ${state.loopName}`)
-        const summaryPrompt = 'Please provide a concise summary of what you accomplished in this session. Focus on: (1) what changes were made, (2) what objectives were achieved, and (3) any verification steps that confirm success. Keep it to 2-3 sentences.'
-        
-        const summaryResult = await v2Client.session.promptAsync({
-          sessionID: sessionId,
-          directory: state.worktreeDir,
-          parts: [{ type: 'text' as const, text: summaryPrompt }],
-        })
-        
-        // Extract the summary from the response
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const resultData = summaryResult.data as any
-        const messages = (resultData?.messages ?? []) as Array<{
-          info: { role: string }
-          parts: Array<{ type: string; text?: string }>
-        }>
-        const lastAssistantMsg = [...messages].reverse().find((m) => m.info.role === 'assistant')
-        if (lastAssistantMsg) {
-          summaryPromptResult = lastAssistantMsg.parts
-            .filter((p) => p.type === 'text' && typeof p.text === 'string')
-            .map((p) => p.text as string)
-            .join('\n')
-        }
-      } catch (err) {
-        logger.error(`Loop: failed to request completion summary`, err)
-      }
-    }
-
     try {
       await v2Client.session.abort({ sessionID: sessionId })
     } catch {
@@ -358,35 +245,34 @@ export function createLoopEventHandler(
     logger.log(`Loop terminated: reason="${reason}", loop="${state.loopName}", iteration=${state.iteration}`)
 
     // Log worktree completion if configured and loop completed successfully
-    // Dispatch via host session to avoid sandbox permission issues
+    // Write directly from host context using filesystem calls
     if (reason === 'completed' && state.worktree) {
-      const sessionOutput = await fetchSessionOutput(v2Client, sessionId, state.worktreeDir, logger)
       const completionTimestamp = new Date()
-      
-      // Build the completion payload from host project directory context
+      const planText = loopService.getPlanText(state.loopName, state.sessionId)
+
       const completionResult = buildWorktreeCompletionPayload(
         getConfig(),
         {
-          projectDir: state.projectDir,
+          projectDir,
           loopName: state.loopName,
           completionTimestamp,
-          sessionOutput,
           iteration: state.iteration,
           worktreeBranch: state.worktreeBranch,
-          summary: summaryPromptResult || undefined,
           dataDir,
         },
         logger,
       )
-      
+
       if (completionResult) {
-        // Spawn a dedicated host session to write the log
-        await dispatchWorktreeCompletionLogSession(
-          v2Client,
-          completionResult,
-          state.projectDir,
-          logger,
-        )
+        completionResult.payload.planText = planText
+        const written = writeWorktreeCompletionLog(completionResult.payload, logger)
+        if (written) {
+          logger.log(`Loop: worktree completion log written to ${completionResult.hostPath}`)
+        } else {
+          logger.error(`Loop: failed to write worktree completion log to ${completionResult.hostPath}`)
+        }
+      } else {
+        logger.log(`Loop: worktree completion logging skipped (payload build failed or disabled)`)
       }
     }
 

@@ -265,6 +265,7 @@ export async function run(argv: StatusArgs): Promise<void> {
         console.log(`  Reason:          ${state.terminationReason ?? 'unknown'}`)
         console.log(`  Started:         ${new Date(startedAt).toISOString()}`)
         console.log(`  Completed:       ${new Date(completedAt).toISOString()}`)
+        
         if (state.lastAuditResult) {
           for (const line of formatAuditResult(state.lastAuditResult)) {
             console.log(line)

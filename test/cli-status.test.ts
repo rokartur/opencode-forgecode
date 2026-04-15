@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { existsSync } from 'fs'
 import { join } from 'path'
@@ -234,6 +234,7 @@ describe('CLI Status - summary', () => {
     expect(output).toContain('Recently Completed:')
     expect(output).toContain('completed-one')
   })
+
 })
 
 describe('CLI Status - partial matching', () => {

@@ -5,7 +5,9 @@ export function formatTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
 }
 
-export function formatSessionOutput(sessionOutput: LoopSessionOutput): string[] {
+export function formatSessionOutput(
+  sessionOutput: LoopSessionOutput,
+): string[] {
   const lines: string[] = []
 
   if (sessionOutput.messages.length > 0) {
