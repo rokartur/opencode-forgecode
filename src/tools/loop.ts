@@ -104,6 +104,26 @@ export async function setupLoop(
     const worktreeInfo = worktreeResult.data
     logger.log(`loop: worktree created at ${worktreeInfo.directory} (branch: ${worktreeInfo.branch})`)
 
+    // Seed graph cache from source repo to worktree scope before session creation
+    const seedResult = await (async () => {
+      try {
+        const { seedWorktreeGraphScope } = await import('../utils/worktree-graph-seed')
+        return await seedWorktreeGraphScope({
+          projectId: ctx.projectId,
+          sourceCwd: projectDir,
+          targetCwd: worktreeInfo.directory,
+          dataDir: ctx.dataDir,
+          kvService,
+          logger,
+        })
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        logger.log(`loop: graph seed error (non-fatal): ${reason}`)
+        return { seeded: false, reason }
+      }
+    })()
+    logger.log(`loop: graph seed ${seedResult.seeded ? 'reused' : 'skipped'} (${seedResult.reason})`)
+
     // Worktree sessions no longer need log directory access since logging is dispatched via host session
     // Only resolve log target for non-worktree sessions or if needed for other purposes
     const agentExclusions = agents.code.tools?.exclude

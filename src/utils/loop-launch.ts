@@ -104,6 +104,25 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
     sessionDirectory = worktreeResult.data.directory
     worktreeBranch = worktreeResult.data.branch
     
+    // Seed graph cache from source repo to worktree scope before session creation
+    const dbPathForSeed = options.dbPath ?? join(resolveDataDir(), 'graph.db')
+    const seedResult = await (async () => {
+      try {
+        const { seedWorktreeGraphScope } = await import('./worktree-graph-seed')
+        return await seedWorktreeGraphScope({
+          projectId: options.projectId,
+          sourceCwd: directory,
+          targetCwd: sessionDirectory,
+          dataDir: resolveDataDir(),
+          dbPath: dbPathForSeed,
+        })
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        return { seeded: false, reason }
+      }
+    })()
+    console.log(`loop-launch: graph seed ${seedResult.seeded ? 'reused' : 'skipped'} (${seedResult.reason})`)
+    
     // Worktree sessions no longer need log directory access since logging is dispatched via host session
     const agentExclusions = agents.code.tools?.exclude
     const permissionRuleset = buildLoopPermissionRuleset(config, null, {
