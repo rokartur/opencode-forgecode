@@ -498,8 +498,8 @@ describe('Execute here bypass', () => {
 
     await eventHook({
       event: {
-        type: 'session.idle',
-        properties: { sessionID },
+        type: 'session.status',
+        properties: { sessionID, status: { type: 'idle' } },
       },
     })
 
@@ -511,8 +511,8 @@ describe('Execute here bypass', () => {
 
     await eventHook({
       event: {
-        type: 'session.idle',
-        properties: { sessionID },
+        type: 'session.status',
+        properties: { sessionID, status: { type: 'idle' } },
       },
     })
 
@@ -584,8 +584,8 @@ describe('Execute here bypass', () => {
 
     await eventHook({
       event: {
-        type: 'session.idle',
-        properties: { sessionID: 'non-pending-session' },
+        type: 'session.status',
+        properties: { sessionID: 'non-pending-session', status: { type: 'idle' } },
       },
     })
 

@@ -803,13 +803,22 @@ export function createLoopEventHandler(
       return
     }
 
-    if (event.type !== 'session.idle') return
+    if (event.type !== 'session.status') return
+
+    const status = event.properties?.status as { type?: string } | undefined
+    if (status?.type !== 'idle') return
 
     const sessionId = event.properties?.sessionID as string
     if (!sessionId) return
 
+    logger.debug(`Loop: received idle event for session=${sessionId}`)
+
     const loopName = loopService.resolveLoopName(sessionId)
-    if (!loopName) return
+    if (!loopName) {
+      logger.debug(`Loop: no loop found for session=${sessionId}, ignoring idle event`)
+      return
+    }
+    logger.debug(`Loop: idle event matched loop=${loopName}`)
 
     await withStateLock(loopName, async () => {
       const state = loopService.getActiveState(loopName)

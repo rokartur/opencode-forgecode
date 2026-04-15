@@ -54,7 +54,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
     })
     logger.log(`Initializing plugin for directory: ${directory}, projectId: ${projectId}`)
 
-    const dataDir = config.dataDir ?? resolveDataDir()
+    const dataDir = config.dataDir || resolveDataDir()
     
     const db = initializeDatabase(dataDir)
 

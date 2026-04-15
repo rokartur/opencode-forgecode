@@ -176,6 +176,7 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
     let db: Database | null = null
     try {
       db = new Database(dbPath)
+      db.run('PRAGMA busy_timeout=5000')
       const queries = createKvQuery(db)
       const now = Date.now()
       const TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -208,8 +209,8 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
       
       // Store session mapping
       queries.set(projectId, `loop-session:${sessionId}`, JSON.stringify(uniqueWorktreeName), now + TTL_MS)
-    } catch {
-      // Continue even if DB operations fail
+    } catch (err) {
+      console.error('[forge] loop-launch: failed to persist loop state to KV', err)
     } finally {
       try { db?.close() } catch {}
     }

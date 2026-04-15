@@ -2887,7 +2887,7 @@ describe('worktree completion logging lifecycle', () => {
       })
       loopService.registerLoopSession(sessionId, 'test-worktree')
 
-      await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+      await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
       // Verify the log file was written
       const today = new Date()
@@ -2948,7 +2948,7 @@ describe('worktree completion logging lifecycle', () => {
     })
     loopService.registerLoopSession(sessionId, 'test-worktree')
 
-    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+    await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
     expect(loopService.getAnyState('test-worktree')?.active).toBe(false)
   })
@@ -2996,7 +2996,7 @@ describe('worktree completion logging lifecycle', () => {
     })
     loopService.registerLoopSession(sessionId, 'test-worktree')
 
-    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+    await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
     const finalState = loopService.getAnyState('test-worktree')
     expect(finalState?.active).toBe(false)
@@ -3044,7 +3044,7 @@ describe('worktree completion logging lifecycle', () => {
     })
     loopService.registerLoopSession(sessionId, 'test-worktree')
 
-    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+    await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
     expect(loopService.getAnyState('test-worktree')?.active).toBe(false)
     expect(loopService.getAnyState('test-worktree')?.terminationReason).toBe('completed')
@@ -3096,7 +3096,7 @@ describe('worktree completion logging lifecycle', () => {
     })
     loopService.registerLoopSession(sessionId, 'test-worktree')
 
-    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+    await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
     const finalState = loopService.getAnyState('test-worktree')
     expect(finalState?.active).toBe(false)
@@ -3155,7 +3155,7 @@ describe('worktree completion logging lifecycle', () => {
       })
       loopService.registerLoopSession(sessionId, 'test-worktree')
 
-      await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+      await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
       const finalState = loopService.getAnyState('test-worktree')
       expect(finalState?.active).toBe(false)
@@ -3227,7 +3227,7 @@ describe('worktree completion logging lifecycle', () => {
       })
       loopService.registerLoopSession(sessionId, 'test-worktree')
 
-      await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+      await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
       const today = new Date()
       const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
@@ -3295,7 +3295,7 @@ describe('worktree completion logging lifecycle', () => {
     })
     loopService.registerLoopSession(sessionId, 'test-worktree')
 
-    await handler.onEvent({ event: { type: 'session.idle', properties: { sessionID: sessionId } } })
+    await handler.onEvent({ event: { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } } })
 
     expect(createCalls).toBe(0)
     expect(loopService.getAnyState('test-worktree')?.active).toBe(false)

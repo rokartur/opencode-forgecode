@@ -81,6 +81,7 @@ function cancelLoop(projectId: string, loopName: string): string | null {
   let db: Database | null = null
   try {
     db = new Database(dbPath)
+    db.run('PRAGMA busy_timeout=5000')
     const key = `loop:${loopName}`
     const now = Date.now()
     const row = db.prepare('SELECT data, project_id FROM project_kv WHERE project_id = ? AND key = ? AND expires_at > ?').get(projectId, key, now) as { data: string; project_id: string } | null
@@ -117,13 +118,14 @@ async function restartLoop(projectId: string, loopName: string, api: TuiPluginAp
   let db: Database | null = null
   try {
     db = new Database(dbPath)
+    db.run('PRAGMA busy_timeout=5000')
     const key = `loop:${loopName}`
     const now = Date.now()
     const row = db.prepare('SELECT data, project_id FROM project_kv WHERE project_id = ? AND key = ? AND expires_at > ?').get(projectId, key, now) as { data: string; project_id: string } | null
     if (!row) return null
 
     const state = JSON.parse(row.data)
-    
+
     if (state.active) {
       try { await api.client.session.abort({ sessionID: state.sessionId }) } catch {}
       const oldSessionKey = `loop-session:${state.sessionId}`

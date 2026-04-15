@@ -121,9 +121,10 @@ export function writePlan(projectId: string, sessionID: string, content: string,
   let db: Database | null = null
   try {
     db = new Database(dbPath)
+    db.run('PRAGMA busy_timeout=5000')
     const now = Date.now()
     const ttl = 7 * 24 * 60 * 60 * 1000
-    
+
     const planKey = resolvePlanKey(projectId, sessionID, dbPath)
     db.prepare(
       'INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
@@ -152,7 +153,8 @@ export function deletePlan(projectId: string, sessionID: string, dbPathOverride?
   let db: Database | null = null
   try {
     db = new Database(dbPath)
-    
+    db.run('PRAGMA busy_timeout=5000')
+
     const planKey = resolvePlanKey(projectId, sessionID, dbPath)
     const result = db.prepare(
       'DELETE FROM project_kv WHERE project_id = ? AND key = ?'

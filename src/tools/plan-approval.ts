@@ -216,8 +216,11 @@ export function createPlanApprovalEventHook(ctx: ToolContext) {
   const { v2, logger } = ctx
   
   return async (eventInput: { event: { type: string; properties?: Record<string, unknown> } }) => {
-    if (eventInput.event?.type !== 'session.idle') return
-    
+    if (eventInput.event?.type !== 'session.status') return
+
+    const status = eventInput.event.properties?.status as { type?: string } | undefined
+    if (status?.type !== 'idle') return
+
     const sessionID = eventInput.event.properties?.sessionID as string
     if (!sessionID) return
     
