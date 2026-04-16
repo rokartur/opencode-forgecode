@@ -24,6 +24,24 @@ Add to your `opencode.json`:
 }
 ```
 
+## Screenshots
+
+Plan viewer showing the plan in rendered markdown format:
+
+![Plan Viewer](docs/images/view-plan.webp)
+
+Execution flow dialog with mode and model selection:
+
+![Execution Flow](docs/images/execution.webp)
+
+Plan editor with raw text editing:
+
+![Plan Editor](docs/images/plan-editor.webp)
+
+Loop search dialog:
+
+![Search Loops](docs/images/search-loops.webp)
+
 ## Features
 
 - **Graph Indexing** - Code structure graph with file watching, auto-scanning, and symbol tracking
