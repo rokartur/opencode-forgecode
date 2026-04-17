@@ -51,7 +51,7 @@ describe('RPC client error handling', () => {
     // Manually set worker error
     const error = new Error('Test error')
     // Access private property via type assertion workaround
-    ;(client as unknown as { workerError: Error | null }).workerError = error
+    ;(client as unknown as { transportError: Error | null }).transportError = error
     
     // Calling should throw
     await expect(client.call('test', [])).rejects.toThrow('Test error')

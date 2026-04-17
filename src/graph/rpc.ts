@@ -1,6 +1,8 @@
 /// <reference types="bun-types" />
 
 import { EventEmitter } from 'events'
+import type { RpcTransport } from './ipc-transport'
+import { WorkerTransport } from './ipc-transport'
 
 /**
  * Per-call RPC timeout in milliseconds.
@@ -10,40 +12,43 @@ import { EventEmitter } from 'events'
  */
 export const RPC_TIMEOUT_MS = parseInt(process.env.GRAPH_RPC_TIMEOUT_MS ?? '120000', 10)
 
+function isWorkerLike(x: unknown): x is Worker {
+  return !!x && typeof (x as any).postMessage === 'function' && typeof (x as any).terminate === 'function'
+}
+
 /**
- * Generic RPC client for worker communication
- * Simplified from SoulForge without Zustand store references
+ * Generic RPC client. Speaks to either:
+ *   - an in-process Worker (leader mode; WorkerTransport wraps it), or
+ *   - a Unix socket / named pipe leader (follower mode; SocketTransport).
+ *
+ * The transport is responsible for delivery and liveness; RpcClient only
+ * tracks pending calls and timeouts.
  */
 export class RpcClient extends EventEmitter {
-  private worker: Worker
+  private transport: RpcTransport
   private pendingCalls: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }> = new Map()
   private callId = 0
-  private workerTerminated = false
-  private workerError: Error | null = null
+  private terminated = false
+  private transportError: Error | null = null
 
-  constructor(worker: Worker, private logger?: { error: (msg: string, error?: unknown) => void; debug?: (msg: string) => void }) {
+  constructor(transportOrWorker: RpcTransport | Worker, private logger?: { error: (msg: string, error?: unknown) => void; debug?: (msg: string) => void }) {
     super()
-    this.worker = worker
-    this.setupWorkerHandlers()
+    this.transport = isWorkerLike(transportOrWorker) ? new WorkerTransport(transportOrWorker) : transportOrWorker
+    this.setupTransportHandlers()
   }
 
-  private setupWorkerHandlers(): void {
-    this.worker.onmessage = (event: MessageEvent) => {
-      this.handleMessage(event.data)
-    }
-    
-    this.worker.onerror = (error: ErrorEvent) => {
-      this.workerError = error instanceof Error ? error : new Error(error.message || 'Worker error')
-      this.logger?.error('Worker error occurred', this.workerError)
-      this.rejectAllPending(new Error(`Worker error: ${this.workerError.message}`))
+  private setupTransportHandlers(): void {
+    this.transport.onMessage((data) => this.handleMessage(data))
+    this.transport.onError((error) => {
+      this.transportError = error
+      this.logger?.error('RPC transport error', error)
+      this.rejectAllPending(new Error(`Transport error: ${error.message}`))
       this.emit('error', error)
-    }
-
-    // Handle worker termination
-    this.worker.addEventListener('messageerror', () => {
-      this.workerTerminated = true
-      this.logger?.error('Worker message error - worker may be terminated')
-      this.rejectAllPending(new Error('Worker terminated'))
+    })
+    this.transport.onClose(() => {
+      this.terminated = true
+      this.rejectAllPending(new Error('Transport closed'))
+      this.emit('exit')
     })
   }
 
@@ -79,11 +84,11 @@ export class RpcClient extends EventEmitter {
   }
 
   async call<T>(method: string, args: unknown[]): Promise<T> {
-    if (this.workerTerminated) {
+    if (this.terminated) {
       throw new Error('Worker has been terminated')
     }
-    if (this.workerError) {
-      throw new Error(`Worker error: ${this.workerError.message}`)
+    if (this.transportError) {
+      throw new Error(`Worker error: ${this.transportError.message}`)
     }
 
     const callId = ++this.callId
@@ -96,15 +101,15 @@ export class RpcClient extends EventEmitter {
       }, RPC_TIMEOUT_MS)
 
       this.pendingCalls.set(callId, { resolve: resolve as (value: unknown) => void, reject, timeout })
-      
+
       try {
-        this.worker.postMessage(message)
+        this.transport.send(message)
       } catch (error) {
         clearTimeout(timeout)
         this.pendingCalls.delete(callId)
-        this.workerTerminated = true
+        this.terminated = true
         const postError = error instanceof Error ? error : new Error(String(error))
-        this.workerError = postError // Set error for consistent state tracking
+        this.transportError = postError
         this.logger?.error('Failed to post message to worker', postError)
         this.rejectAllPending(postError)
         reject(postError)
@@ -113,17 +118,31 @@ export class RpcClient extends EventEmitter {
   }
 
   terminate(): void {
-    this.workerTerminated = true
-    this.worker.terminate()
+    this.terminated = true
+    this.transport.close()
   }
 
   isHealthy(): boolean {
-    return !this.workerTerminated && this.workerError === null
+    return !this.terminated && this.transportError === null && this.transport.isHealthy()
   }
 
   markTerminated(): void {
-    this.workerTerminated = true
+    this.terminated = true
     this.rejectAllPending(new Error('Worker terminated'))
+  }
+
+  /** Swap the underlying transport (used for failover — see Phase 4). */
+  setTransport(transport: RpcTransport): void {
+    this.rejectAllPending(new Error('Transport swapped'))
+    try {
+      this.transport.close()
+    } catch {
+      /* ignore */
+    }
+    this.transport = transport
+    this.terminated = false
+    this.transportError = null
+    this.setupTransportHandlers()
   }
 }
 
