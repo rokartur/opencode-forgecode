@@ -15,9 +15,9 @@ import {
 
 // Minimal tree-sitter type definitions
 interface TSParser {
-  parse(source: string, oldTree?: TSTree): TSTree
-  setLanguage(language: TSLanguage): void
-  delete(): void
+  parse(source: string, oldTree?: TSTree): TSTree;
+  setLanguage(language: TSLanguage): void;
+  delete(): void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -26,48 +26,52 @@ interface TSLanguage {
 }
 
 interface TSTree {
-  root: TSNode
-  rootNode: TSNode
-  edit(edit: { startIndex: number; oldEndIndex: number; newEndIndex: number }): void
-  delete(): void
-  copy(): TSTree
+  root: TSNode;
+  rootNode: TSNode;
+  edit(edit: { startIndex: number; oldEndIndex: number; newEndIndex: number }): void;
+  delete(): void;
+  copy(): TSTree;
 }
 
 interface TSNode {
-  type: string
-  text: string
-  startPosition: { row: number; column: number }
-  endPosition: { row: number; column: number }
-  startIndex: number
-  endIndex: number
-  children: TSNode[]
-  namedChildren: TSNode[]
-  childCount: number
-  namedChildCount: number
-  child(index: number): TSNode | null
-  namedChild(index: number): TSNode | null
-  childForFieldName(fieldName: string): TSNode | null
-  parent: TSNode | null
-  nextSibling: TSNode | null
-  previousSibling: TSNode | null
-  descendantForIndex(startIndex: number, endIndex?: number): TSNode
-  namedDescendantForIndex(startIndex: number, endIndex?: number): TSNode
-  descendantsOfType(types: string | string[], startPosition?: { row: number; column: number }, endPosition?: { row: number; column: number }): TSNode[]
+  type: string;
+  text: string;
+  startPosition: { row: number; column: number };
+  endPosition: { row: number; column: number };
+  startIndex: number;
+  endIndex: number;
+  children: TSNode[];
+  namedChildren: TSNode[];
+  childCount: number;
+  namedChildCount: number;
+  child(index: number): TSNode | null;
+  namedChild(index: number): TSNode | null;
+  childForFieldName(fieldName: string): TSNode | null;
+  parent: TSNode | null;
+  nextSibling: TSNode | null;
+  previousSibling: TSNode | null;
+  descendantForIndex(startIndex: number, endIndex?: number): TSNode;
+  namedDescendantForIndex(startIndex: number, endIndex?: number): TSNode;
+  descendantsOfType(
+    types: string | string[],
+    startPosition?: { row: number; column: number },
+    endPosition?: { row: number; column: number },
+  ): TSNode[];
 }
 
 interface TSQueryMatch {
-  captures: TSQueryCapture[]
+  captures: TSQueryCapture[];
 }
 
 interface TSQuery {
-  matches(node: TSNode): TSQueryMatch[]
-  captures(node: TSNode): TSQueryCapture[]
-  delete(): void
+  matches(node: TSNode): TSQueryMatch[];
+  captures(node: TSNode): TSQueryCapture[];
+  delete(): void;
 }
 
 interface TSQueryCapture {
-  name: string
-  node: TSNode
+  name: string;
+  node: TSNode;
 }
 
 // Tree-sitter query patterns per language
@@ -655,11 +659,17 @@ export class TreeSitterBackend {
 
   private resolveWasm(filename: string): string {
     const basename = filename.split("/").pop() ?? filename;
+    // web-tree-sitter >= 0.25 renamed the runtime wasm to `web-tree-sitter.wasm`.
+    // Older versions shipped it as `tree-sitter.wasm`. Try both.
+    const candidates =
+      basename === "tree-sitter.wasm" ? ["tree-sitter.wasm", "web-tree-sitter.wasm"] : [basename];
     let dir = import.meta.dir;
     for (let i = 0; i < 5; i++) {
       for (const sub of ["node_modules/web-tree-sitter", "node_modules/tree-sitter-wasms/out"]) {
-        const p = join(dir, sub, basename);
-        if (existsSync(p)) return p;
+        for (const name of candidates) {
+          const p = join(dir, sub, name);
+          if (existsSync(p)) return p;
+        }
       }
       const parent = dirname(dir);
       if (parent === dir) break;

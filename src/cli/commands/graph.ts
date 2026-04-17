@@ -277,11 +277,11 @@ export function help(): void {
 Manage graph indexing
 
 Usage:
-  oc-forge graph status [options]
-  oc-forge graph scan [options]
-  oc-forge graph list [options]
-  oc-forge graph remove <target> [options]
-  oc-forge graph cleanup --days <n> [options]
+  oc-forgecode graph status [options]
+  oc-forgecode graph scan [options]
+  oc-forgecode graph list [options]
+  oc-forgecode graph remove <target> [options]
+  oc-forgecode graph cleanup --days <n> [options]
 
 Actions:
   status    Show graph indexing status for current project

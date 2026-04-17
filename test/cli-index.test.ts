@@ -10,7 +10,7 @@ describe('CLI index routing', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('Show loop status')
-    expect(result.stdout).toContain('oc-forge loop status')
+    expect(result.stdout).toContain('oc-forgecode loop status')
   })
 
   test('nested graph help reaches the graph command', () => {
@@ -21,6 +21,6 @@ describe('CLI index routing', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('Manage graph indexing')
-    expect(result.stdout).toContain('oc-forge graph scan')
+    expect(result.stdout).toContain('oc-forgecode graph scan')
   })
 })

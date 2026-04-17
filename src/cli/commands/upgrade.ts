@@ -37,7 +37,7 @@ export function help(): void {
 Check for and install plugin updates
 
 Usage:
-  oc-forge upgrade
+  oc-forgecode upgrade
 
 Options:
   --help, -h    Show this help message

@@ -10,7 +10,9 @@
     "file": ""
   },
 
-  // Session compaction settings
+  // Session compaction settings for forgecode's own prompt override/fallback.
+  // Keep OpenCode's native `compaction.auto=true` and `compaction.prune=true`
+  // in `opencode.json`; this block does not replace the root OpenCode setting.
   "compaction": {
     "customPrompt": true,
     "maxContextTokens": 0
@@ -25,7 +27,8 @@
   // Model override for plan execution sessions (format: "provider/model")
   "executionModel": "",
 
-  // Model override for the auditor agent (format: "provider/model")
+  // Model override for the sage agent in review mode (format: "provider/model")
+  // Kept as `auditorModel` for backwards compatibility.
   "auditorModel": "",
 
   // Iterative development loop settings
@@ -58,6 +61,21 @@
     "debounceMs": 100
   },
 
+  // Forge harness (system prompts, summary-frame compaction, truncation,
+  // doom-loop detection, pending-todo reminders, undo snapshots).
+  // If you also use DCP, leave this enabled so forgecode still owns the final
+  // `experimental.session.compacting` summary-frame step.
+  "harness": {
+    "enabled": true,
+    "doomLoopThreshold": 3,
+    "pendingTodosReminder": true,
+    "snapshots": true,
+    "compaction": true,
+    "truncation": {
+      "enabled": true
+    }
+  },
+
   // TUI sidebar widget configuration
   "tui": {
     "sidebar": true,
@@ -69,10 +87,10 @@
   "defaultKvTtlMs": 604800000,
 
   // Per-agent overrides (temperature range: 0.0 - 2.0)
-  // Keys are agent display names (e.g., "code", "architect", "auditor")
-  // "agents": {
-  //   "architect": { "temperature": 0.0 },
-  //   "auditor": { "temperature": 0.0 },
-  //   "code": { "temperature": 0.7 }
-  // }
+  // Keys are agent display names: "forge", "muse", "sage"
+  "agents": {
+    "forge": { "temperature": 0.7 },
+    "muse": { "temperature": 0.0 },
+    "sage": { "temperature": 0.0 }
+  }
 }

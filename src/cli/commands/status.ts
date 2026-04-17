@@ -320,7 +320,7 @@ export async function run(argv: StatusArgs): Promise<void> {
         }
         
         if (recentLoops.length > limit) {
-          console.log(`  ... and ${recentLoops.length - limit} more. Use 'oc-forge loop status <name>' for details.`)
+          console.log(`  ... and ${recentLoops.length - limit} more. Use 'oc-forgecode loop status <name>' for details.`)
           console.log('')
         }
       }
@@ -330,7 +330,7 @@ export async function run(argv: StatusArgs): Promise<void> {
         console.log('No loops found.')
         console.log('')
       } else {
-        console.log("Run 'oc-forge loop status <name>' for detailed information.")
+        console.log("Run 'oc-forgecode loop status <name>' for detailed information.")
         console.log('')
       }
     }
@@ -344,8 +344,8 @@ export function help(): void {
 Show loop status
 
 Usage:
-  oc-forge loop status [options]
-  oc-forge loop status <name> [options]
+  oc-forgecode loop status [options]
+  oc-forgecode loop status <name> [options]
 
 Arguments:
   name                    Worktree name for detailed status (optional, supports partial matching)

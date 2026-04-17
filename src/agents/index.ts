@@ -1,12 +1,12 @@
-import type { AgentRole, AgentDefinition } from './types'
-import { codeAgent } from './code'
-import { architectAgent } from './architect'
-import { auditorAgent } from './auditor'
+import type { AgentRole, AgentDefinition } from "./types";
+import { forgeAgent } from "./forge";
+import { museAgent } from "./muse";
+import { sageAgent } from "./sage";
 
 export const agents: Record<AgentRole, AgentDefinition> = {
-  code: codeAgent,
-  architect: architectAgent,
-  auditor: auditorAgent,
-}
+  forge: forgeAgent,
+  muse: museAgent,
+  sage: sageAgent,
+};
 
-export { type AgentRole, type AgentDefinition, type AgentConfig } from './types'
+export { type AgentRole, type AgentDefinition, type AgentConfig } from "./types";

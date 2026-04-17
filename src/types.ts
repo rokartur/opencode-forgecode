@@ -1,79 +1,77 @@
 /**
  * Scope for memory entries used in RAG-style memory injection.
  */
-export type MemoryScope = 'convention' | 'decision' | 'context'
+export type MemoryScope = "convention" | "decision" | "context";
 
 /**
  * A memory entry stored for retrieval-augmented generation.
  */
 export interface Memory {
-  id: number
-  projectId: string
-  scope: MemoryScope
-  content: string
-  filePath: string | null
-  accessCount: number
-  lastAccessedAt: number | null
-  createdAt: number
-  updatedAt: number
+  id: number;
+  projectId: string;
+  scope: MemoryScope;
+  content: string;
+  filePath: string | null;
+  accessCount: number;
+  lastAccessedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 /**
  * Input for creating a new memory entry.
  */
 export interface CreateMemoryInput {
-  projectId: string
-  scope: MemoryScope
-  content: string
-  filePath?: string
+  projectId: string;
+  scope: MemoryScope;
+  content: string;
+  filePath?: string;
 }
 
 /**
  * Input for updating an existing memory entry.
  */
 export interface UpdateMemoryInput {
-  content?: string
-  scope?: MemoryScope
+  content?: string;
+  scope?: MemoryScope;
 }
 
 /**
  * A memory entry with its similarity distance from a query.
  */
 export interface MemorySearchResult {
-  memory: Memory
-  distance: number
+  memory: Memory;
+  distance: number;
 }
 
 /**
  * Statistics about memory usage for a project.
  */
 export interface MemoryStats {
-  projectId: string
-  total: number
-  byScope: Record<MemoryScope, number>
+  projectId: string;
+  total: number;
+  byScope: Record<MemoryScope, number>;
 }
-
-
 
 /**
  * Configuration for plugin logging.
  */
 export interface LoggingConfig {
   /** Enable file logging. */
-  enabled: boolean
+  enabled: boolean;
   /** Path to the log file. */
-  file: string
+  file: string;
   /** Enable verbose debug logging. */
-  debug?: boolean
+  debug?: boolean;
 }
 
 /**
  * Logger interface for plugin-wide logging.
  */
 export interface Logger {
-  log: (message: string, ...args: unknown[]) => void
-  error: (message: string, ...args: unknown[]) => void
-  debug: (message: string, ...args: unknown[]) => void
+  log: (message: string, ...args: unknown[]) => void;
+  error: (message: string, ...args: unknown[]) => void;
+  debug: (message: string, ...args: unknown[]) => void;
 }
 
 /**
@@ -81,9 +79,9 @@ export interface Logger {
  */
 export interface WorktreeLoggingConfig {
   /** Enable worktree loop completion logging. Defaults to false. */
-  enabled?: boolean
+  enabled?: boolean;
   /** Directory to write completion logs. Defaults to platform data dir. */
-  directory?: string
+  directory?: string;
 }
 
 /**
@@ -91,21 +89,21 @@ export interface WorktreeLoggingConfig {
  */
 export interface LoopConfig {
   /** Enable autonomous loop execution. Defaults to true. */
-  enabled?: boolean
+  enabled?: boolean;
   /** Default maximum iterations per loop. */
-  defaultMaxIterations?: number
+  defaultMaxIterations?: number;
   /** Clean up worktrees when loops complete. */
-  cleanupWorktree?: boolean
+  cleanupWorktree?: boolean;
   /** Enable automatic code auditing after each iteration. */
-  defaultAudit?: boolean
+  defaultAudit?: boolean;
   /** Model to use for loop iterations. */
-  model?: string
+  model?: string;
   /** Timeout in ms before considering a loop stalled. */
-  stallTimeoutMs?: number
+  stallTimeoutMs?: number;
   /** Minimum number of audits before a loop can complete. */
-  minAudits?: number
+  minAudits?: number;
   /** Worktree loop completion logging configuration. */
-  worktreeLogging?: WorktreeLoggingConfig
+  worktreeLogging?: WorktreeLoggingConfig;
 }
 
 /**
@@ -113,18 +111,18 @@ export interface LoopConfig {
  */
 export interface SandboxConfig {
   /** Sandbox mode - 'off' disables sandboxing, 'docker' enables it. */
-  mode: 'off' | 'docker'
+  mode: "off" | "docker";
   /** Docker image to use for sandboxed execution. */
-  image?: string
+  image?: string;
 }
 
 /**
  * Filter options for listing memories.
  */
 export interface ListMemoriesFilter {
-  scope?: MemoryScope
-  limit?: number
-  offset?: number
+  scope?: MemoryScope;
+  limit?: number;
+  offset?: number;
 }
 
 /**
@@ -132,9 +130,9 @@ export interface ListMemoriesFilter {
  */
 export interface CompactionConfig {
   /** Use a custom compaction prompt. */
-  customPrompt?: boolean
+  customPrompt?: boolean;
   /** Maximum context tokens for compaction. */
-  maxContextTokens?: number
+  maxContextTokens?: number;
 }
 
 /**
@@ -143,17 +141,17 @@ export interface CompactionConfig {
  */
 export interface MemoryInjectionConfig {
   /** Enable memory injection. */
-  enabled?: boolean
+  enabled?: boolean;
   /** Maximum number of memory results to inject. */
-  maxResults?: number
+  maxResults?: number;
   /** Maximum similarity distance threshold. */
-  distanceThreshold?: number
+  distanceThreshold?: number;
   /** Maximum tokens to inject. */
-  maxTokens?: number
+  maxTokens?: number;
   /** @deprecated Use defaultKvTtlMs in root config instead */
-  cacheTtlMs?: number
+  cacheTtlMs?: number;
   /** Enable debug logging for memory injection. */
-  debug?: boolean
+  debug?: boolean;
 }
 
 /**
@@ -161,9 +159,9 @@ export interface MemoryInjectionConfig {
  */
 export interface MessagesTransformConfig {
   /** Enable message transformation. Defaults to true. */
-  enabled?: boolean
+  enabled?: boolean;
   /** Enable debug logging. */
-  debug?: boolean
+  debug?: boolean;
 }
 
 /**
@@ -171,20 +169,20 @@ export interface MessagesTransformConfig {
  */
 export interface TuiConfig {
   /** Show sidebar. */
-  sidebar?: boolean
+  sidebar?: boolean;
   /** Show active loops in TUI. */
-  showLoops?: boolean
+  showLoops?: boolean;
   /** Show version information. */
-  showVersion?: boolean
+  showVersion?: boolean;
   /** Keyboard shortcut overrides for Forge commands. */
   keybinds?: {
     /** View plan dialog. Default: Meta+Shift+P */
-    viewPlan?: string
+    viewPlan?: string;
     /** Execute plan dialog. Default: Meta+Shift+E */
-    executePlan?: string
+    executePlan?: string;
     /** Show loops dialog. Default: Meta+Shift+L */
-    showLoops?: string
-  }
+    showLoops?: string;
+  };
 }
 
 /**
@@ -192,7 +190,7 @@ export interface TuiConfig {
  */
 export interface AgentOverrideConfig {
   /** Override default model temperature. */
-  temperature?: number
+  temperature?: number;
 }
 
 /**
@@ -200,13 +198,45 @@ export interface AgentOverrideConfig {
  */
 export interface GraphConfig {
   /** Enable graph indexing. Defaults to true. */
-  enabled?: boolean
+  enabled?: boolean;
   /** Auto-check existing graph cache on startup and scan only when missing/stale. Defaults to true. */
-  autoScan?: boolean
+  autoScan?: boolean;
   /** Watch filesystem for changes. */
-  watch?: boolean
+  watch?: boolean;
   /** Debounce delay in ms for file change events. */
-  debounceMs?: number
+  debounceMs?: number;
+}
+
+/**
+ * Configuration for the forge harness (system-prompt partials, summary-frame
+ * compaction, truncation, doom-loop detection, pending-todo reminders, and
+ * filesystem snapshots used by the fs_undo tool).
+ */
+export interface HarnessConfig {
+  /** Enable the harness module. Defaults to true. */
+  enabled?: boolean;
+  /**
+   * Number of consecutive identical tool-call patterns required to trigger a
+   * doom-loop reminder. Defaults to 3.
+   */
+  doomLoopThreshold?: number;
+  /** Emit a reminder when a session idles with open todos. Defaults to true. */
+  pendingTodosReminder?: boolean;
+  /**
+   * Record `.bak` snapshots before mutating tools run so `fs_undo` can roll
+   * them back. Defaults to true.
+   */
+  snapshots?: boolean;
+  /**
+   * Replace the default compaction prompt with a forge summary-frame. Defaults
+   * to true.
+   */
+  compaction?: boolean;
+  /** Per-tool output truncation settings. */
+  truncation?: {
+    /** Enable output truncation. Defaults to true. */
+    enabled?: boolean;
+  };
 }
 
 /**
@@ -214,58 +244,58 @@ export interface GraphConfig {
  */
 export interface PluginConfig {
   /** Custom data directory for plugin storage. Defaults to platform data dir. */
-  dataDir?: string
+  dataDir?: string;
   /** Logging configuration. */
-  logging?: LoggingConfig
+  logging?: LoggingConfig;
   /** Compaction behavior configuration. */
-  compaction?: CompactionConfig
+  compaction?: CompactionConfig;
   /** Message transformation for architect agent. */
-  messagesTransform?: MessagesTransformConfig
+  messagesTransform?: MessagesTransformConfig;
   /** Model to use for code execution. */
-  executionModel?: string
+  executionModel?: string;
   /** Model to use for code auditing. */
-  auditorModel?: string
+  auditorModel?: string;
   /** Loop behavior configuration. */
-  loop?: LoopConfig
+  loop?: LoopConfig;
   /** @deprecated Use `loop` instead */
-  ralph?: LoopConfig
+  ralph?: LoopConfig;
   /** Default TTL for KV entries in milliseconds. */
-  defaultKvTtlMs?: number
+  defaultKvTtlMs?: number;
   /** TUI display configuration. */
-  tui?: TuiConfig
+  tui?: TuiConfig;
   /** Per-agent configuration overrides. */
-  agents?: Record<string, AgentOverrideConfig>
+  agents?: Record<string, AgentOverrideConfig>;
   /** Sandbox execution configuration. */
-  sandbox?: SandboxConfig
+  sandbox?: SandboxConfig;
   /** Graph indexing configuration. */
-  graph?: GraphConfig
+  graph?: GraphConfig;
+  /** Forge harness configuration. */
+  harness?: HarnessConfig;
 }
-
-
 
 /**
  * Export format for memories and data.
  */
-export type ExportFormat = 'json' | 'markdown'
+export type ExportFormat = "json" | "markdown";
 
 /**
  * Options for exporting memories or other data.
  */
 export interface ExportOptions {
   /** Export format. Defaults to 'json'. */
-  format?: ExportFormat
+  format?: ExportFormat;
   /** Output file path. */
-  output?: string
+  output?: string;
   /** Project ID to export from. */
-  projectId?: string
+  projectId?: string;
   /** Filter by memory scope. */
-  scope?: MemoryScope
+  scope?: MemoryScope;
   /** Maximum number of entries to export. */
-  limit?: number
+  limit?: number;
   /** Offset for pagination. */
-  offset?: number
+  offset?: number;
   /** Path to database file. */
-  dbPath?: string
+  dbPath?: string;
 }
 
 /**
@@ -273,11 +303,11 @@ export interface ExportOptions {
  */
 export interface ImportOptions {
   /** Import format. Defaults to 'json'. */
-  format?: ExportFormat
+  format?: ExportFormat;
   /** Target project ID. */
-  projectId: string
+  projectId: string;
   /** Overwrite existing entries. */
-  force?: boolean
+  force?: boolean;
   /** Path to database file. */
-  dbPath?: string
+  dbPath?: string;
 }

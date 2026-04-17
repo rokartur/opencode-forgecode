@@ -135,7 +135,7 @@ export function formatUpgradeCheck(check: UpgradeCheckResult): string {
     return `v${check.current} (unable to check for updates)`
   }
   if (check.updateAvailable) {
-    return `v${check.current} → v${check.latest} available. Run oc-forge upgrade to update.`
+    return `v${check.current} → v${check.latest} available. Run oc-forgecode upgrade to update.`
   }
   return `v${check.current} (latest)`
 }

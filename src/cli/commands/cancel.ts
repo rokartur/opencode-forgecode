@@ -105,7 +105,7 @@ export async function run(argv: CancelArgs): Promise<void> {
           console.log(`  - ${l.state.loopName}`)
         }
         console.log('')
-        console.log("Run 'oc-forge loop cancel <name>' to cancel a specific loop.")
+        console.log("Run 'oc-forgecode loop cancel <name>' to cancel a specific loop.")
         console.log('')
         process.exit(1)
       }
@@ -179,7 +179,7 @@ export function help(): void {
 Cancel a loop
 
 Usage:
-  oc-forge loop cancel [name] [options]
+  oc-forgecode loop cancel [name] [options]
 
 Arguments:
   name                  Worktree name to cancel (optional if only one active)

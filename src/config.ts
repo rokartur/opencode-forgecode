@@ -36,13 +36,13 @@ You have access to four graph tools: graph-status, graph-query, graph-symbols, a
 const PLUGIN_COMMANDS: Record<string, { template: string; description: string; agent: string; subtask: boolean }> = {
   review: {
     description: 'Run a code review.',
-    agent: 'auditor',
+    agent: 'sage',
     subtask: true,
     template: PROMPT_REVIEW,
   },
   loop: {
     description: 'Start an iterative development loop in a worktree',
-    agent: 'code',
+    agent: 'forge',
     subtask: false,
     template: `## Step 1: Prepare the Plan
 
@@ -68,7 +68,7 @@ $ARGUMENTS`,
   },
   'loop-status': {
     description: 'Check status of all active loops',
-    agent: 'code',
+    agent: 'forge',
     subtask: false,
     template: `Check the status of all memory loops.
 
@@ -92,7 +92,7 @@ $ARGUMENTS`,
   },
   'loop-cancel': {
     description: 'Cancel the active loop',
-    agent: 'code',
+    agent: 'forge',
     subtask: false,
     template: `## Step 1: Identify the Loop
 
@@ -169,7 +169,7 @@ export function createConfigHandler(
     }
 
     config.agent = mergedAgents
-    config.default_agent = 'code'
+    config.default_agent = 'forge'
 
     const userCommands = config.command as Record<string, unknown> | undefined
     const mergedCommands: Record<string, unknown> = { ...PLUGIN_COMMANDS }
