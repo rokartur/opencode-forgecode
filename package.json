@@ -75,6 +75,10 @@
     "lint": "eslint .",
     "test": "bun test --max-concurrency=1",
     "typecheck": "tsc --noEmit",
-    "cli": "bun src/cli/index.ts"
+    "cli": "bun src/cli/index.ts",
+    "release:check": "npm run lint && npm pack --dry-run",
+    "update:patch": "npm version patch && git push origin && git push origin --tags",
+    "update:minor": "npm version minor && git push origin && git push origin --tags",
+    "prepack": "npm run build"
   }
 }
