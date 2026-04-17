@@ -1287,8 +1287,11 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 					<text fg={theme().text}>
 						<b>{title()}</b>
 						{!open() && hasPlan() ? <span style={{ fg: theme().info }}> · plan</span> : ''}
-						{!open() && graphStatusFormatted() && graphStatusFormatted()!.text.includes('ready') ? (
-							<span style={{ fg: theme().success }}> · ready</span>
+						{!open() && graphStatusFormatted() ? (
+							<span style={{ fg: theme()[graphStatusFormatted()!.color] }}>
+								{' · '}
+								{graphStatusFormatted()!.text}
+							</span>
 						) : (
 							''
 						)}

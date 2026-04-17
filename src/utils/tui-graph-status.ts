@@ -176,8 +176,15 @@ export function formatGraphStatus(status: GraphStatusPayload | null): {
 		case 'initializing':
 			return { text: 'initializing', color: 'info' }
 
-		case 'error':
+		case 'error': {
+			const MAX_ERROR_LENGTH = 60
+			const msg = status.message?.trim()
+			if (msg) {
+				const truncated = msg.length > MAX_ERROR_LENGTH ? msg.slice(0, MAX_ERROR_LENGTH) + '…' : msg
+				return { text: `error · ${truncated}`, color: 'error' }
+			}
 			return { text: 'error', color: 'error' }
+		}
 
 		case 'unavailable':
 		default:

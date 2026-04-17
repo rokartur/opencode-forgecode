@@ -177,11 +177,51 @@ describe('TUI graph status helper', () => {
 			expect(result.color).toBe('info')
 		})
 
-		test('should format error state', () => {
+		test('should format error state with message', () => {
 			const status: GraphStatusPayload = {
 				state: 'error',
 				ready: false,
 				message: 'Worker initialization failed',
+				updatedAt: Date.now(),
+			}
+
+			const result = formatGraphStatus(status)
+			expect(result.text).toBe('error · Worker initialization failed')
+			expect(result.color).toBe('error')
+		})
+
+		test('should format error state without message', () => {
+			const status: GraphStatusPayload = {
+				state: 'error',
+				ready: false,
+				updatedAt: Date.now(),
+			}
+
+			const result = formatGraphStatus(status)
+			expect(result.text).toBe('error')
+			expect(result.color).toBe('error')
+		})
+
+		test('should truncate long error messages', () => {
+			const longMessage =
+				'Graph index incomplete: 169 files and 2034 symbols indexed but 0 dependency edges or call edges generated. Run graph scan again or clear the cache.'
+			const status: GraphStatusPayload = {
+				state: 'error',
+				ready: false,
+				message: longMessage,
+				updatedAt: Date.now(),
+			}
+
+			const result = formatGraphStatus(status)
+			expect(result.text).toBe('error · Graph index incomplete: 169 files and 2034 symbols indexed b…')
+			expect(result.color).toBe('error')
+		})
+
+		test('should handle error state with empty message', () => {
+			const status: GraphStatusPayload = {
+				state: 'error',
+				ready: false,
+				message: '',
 				updatedAt: Date.now(),
 			}
 
