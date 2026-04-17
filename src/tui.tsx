@@ -6,7 +6,7 @@ import { readFileSync, existsSync, writeFileSync } from "fs";
 import { homedir, platform } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
-import { Database } from "bun:sqlite";
+import { Database } from "./runtime/sqlite";
 import { VERSION } from "./version";
 import { resolveDataDir } from "./storage";
 import { fetchSessionStats, type SessionStats } from "./utils/session-stats";

@@ -1,45 +1,43 @@
-import type { Database } from 'bun:sqlite'
-import type { PluginConfig, Logger } from '../types'
-import type { createKvService } from '../services/kv'
-import type { createLoopService } from '../services/loop'
-import type { createLoopEventHandler } from '../hooks'
-import type { createOpencodeClient as createV2Client } from '@opencode-ai/sdk/v2'
-import type { PluginInput } from '@opencode-ai/plugin'
-import type { createSandboxManager } from '../sandbox/manager'
-import type { GraphService } from '../graph/service'
+import type { Database } from "../runtime/sqlite";
+import type { PluginConfig, Logger } from "../types";
+import type { createKvService } from "../services/kv";
+import type { createLoopService } from "../services/loop";
+import type { createLoopEventHandler } from "../hooks";
+import type { createOpencodeClient as createV2Client } from "@opencode-ai/sdk/v2";
+import type { PluginInput } from "@opencode-ai/plugin";
+import type { createSandboxManager } from "../sandbox/manager";
+import type { GraphService } from "../graph/service";
 
 /**
  * Context passed to all tool implementations providing access to plugin services.
  */
 export interface ToolContext {
   /** The current project ID. */
-  projectId: string
+  projectId: string;
   /** The working directory of the project. */
-  directory: string
+  directory: string;
   /** The plugin configuration. */
-  config: PluginConfig
+  config: PluginConfig;
   /** Logger instance for the plugin. */
-  logger: Logger
+  logger: Logger;
   /** Bun SQLite database instance. */
-  db: Database
+  db: Database;
   /** Data directory path for plugin storage. */
-  dataDir: string
+  dataDir: string;
   /** KV service for key-value storage. */
-  kvService: ReturnType<typeof createKvService>
+  kvService: ReturnType<typeof createKvService>;
   /** Loop service for managing autonomous loops. */
-  loopService: ReturnType<typeof createLoopService>
+  loopService: ReturnType<typeof createLoopService>;
   /** Loop event handler for triggering loop lifecycle events. */
-  loopHandler: ReturnType<typeof createLoopEventHandler>
+  loopHandler: ReturnType<typeof createLoopEventHandler>;
   /** OpenCode v2 API client. */
-  v2: ReturnType<typeof createV2Client>
+  v2: ReturnType<typeof createV2Client>;
   /** Cleanup function to call on plugin shutdown. */
-  cleanup: () => Promise<void>
+  cleanup: () => Promise<void>;
   /** Original plugin input from OpenCode. */
-  input: PluginInput
+  input: PluginInput;
   /** Sandbox manager instance, null if sandboxing is disabled. */
-  sandboxManager: ReturnType<typeof createSandboxManager> | null
+  sandboxManager: ReturnType<typeof createSandboxManager> | null;
   /** Graph service instance, null if graph is disabled. */
-  graphService: GraphService | null
+  graphService: GraphService | null;
 }
-
-

@@ -1,70 +1,80 @@
-import { readFileSync, writeFileSync, cpSync, mkdirSync } from 'fs'
-import { join } from 'path'
-import { execSync } from 'child_process'
-import solidPlugin from '@opentui/solid/bun-plugin'
+import { readFileSync, writeFileSync, cpSync, mkdirSync, rmSync } from "fs";
+import { join } from "path";
+import { execSync } from "child_process";
+import solidPlugin from "@opentui/solid/bun-plugin";
 
-const packageJsonPath = join(__dirname, '..', 'package.json')
-const distVersionPath = join(__dirname, '..', 'dist', 'version.js')
+const rootDir = join(__dirname, "..");
+const packageJsonPath = join(rootDir, "package.json");
+const distDir = join(rootDir, "dist");
 
-const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
-const version = packageJson.version as string
+const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
+  version?: string;
+};
+const buildVersion = packageJson.version ?? "0.0.0";
 
-console.log('Compiling main code...')
-execSync('tsc -p tsconfig.build.json', {
-  cwd: join(__dirname, '..'),
-  stdio: 'inherit'
-})
+console.log("Cleaning dist...");
+rmSync(distDir, { recursive: true, force: true });
 
-const distVersionContent = readFileSync(distVersionPath, 'utf-8').replace(
-  /const BUILD_VERSION = ['\"]__FORGECODE_VERSION_VALUE__['\"];/,
-  `const BUILD_VERSION = '${version}';`
-)
-writeFileSync(distVersionPath, distVersionContent, 'utf-8')
+console.log("Generating type declarations...");
+execSync("tsc -p tsconfig.build.json --emitDeclarationOnly", {
+  cwd: rootDir,
+  stdio: "inherit",
+});
 
-console.log(`Version ${version} injected into dist/version.js`)
+console.log("Bundling server plugin...");
+const serverResult = await Bun.build({
+  entrypoints: [join(rootDir, "src", "index.ts")],
+  outdir: distDir,
+  target: "node",
+  format: "esm",
+  naming: "index.js",
+  external: ["@opencode-ai/plugin", "@opencode-ai/sdk", "@opencode-ai/sdk/v2", "better-sqlite3"],
+  define: {
+    __FORGECODE_VERSION_VALUE__: JSON.stringify(buildVersion),
+  },
+});
 
-console.log('Compiling TUI plugin...')
-const result = await Bun.build({
-  entrypoints: [join(__dirname, '..', 'src', 'tui.tsx')],
-  outdir: join(__dirname, '..', 'dist'),
-  target: 'node',
+console.log("Compiling TUI plugin...");
+const tuiResult = await Bun.build({
+  entrypoints: [join(rootDir, "src", "tui.tsx")],
+  outdir: distDir,
+  target: "node",
+  format: "esm",
   plugins: [solidPlugin],
-  external: ['@opentui/solid', '@opentui/core', '@opencode-ai/plugin/tui', 'solid-js'],
-})
+  external: ["@opencode-ai/plugin/tui", "better-sqlite3"],
+  define: {
+    __FORGECODE_VERSION_VALUE__: JSON.stringify(buildVersion),
+  },
+});
 
-console.log('Bundling graph worker...')
+console.log("Bundling graph worker...");
 const workerResult = await Bun.build({
-  entrypoints: [join(__dirname, '..', 'src', 'graph', 'worker.ts')],
-  outdir: join(__dirname, '..', 'dist', 'graph'),
-  target: 'node',
-  format: 'esm',
-})
+  entrypoints: [join(rootDir, "src", "graph", "worker.ts")],
+  outdir: join(distDir, "graph"),
+  target: "node",
+  format: "esm",
+});
 
-if (!workerResult.success) {
-  for (const log of workerResult.logs) {
-    console.error(log)
+for (const result of [serverResult, tuiResult, workerResult]) {
+  if (!result.success) {
+    for (const log of result.logs) {
+      console.error(log);
+    }
+    process.exit(1);
   }
-  process.exit(1)
 }
 
-if (!result.success) {
-  for (const log of result.logs) {
-    console.error(log)
-  }
-  process.exit(1)
-}
-
-console.log('Generating TUI type declarations...')
+console.log("Generating TUI type declarations...");
 const tuiDtsContent = `import type { TuiPluginModule } from '@opencode-ai/plugin/tui';
 declare const plugin: TuiPluginModule & { id: string };
 export default plugin;
-`
-writeFileSync(join(__dirname, '..', 'dist', 'tui.d.ts'), tuiDtsContent, 'utf-8')
+`;
+writeFileSync(join(distDir, "tui.d.ts"), tuiDtsContent, "utf-8");
 
-console.log('Copying template files...')
-const srcTemplateDir = join(__dirname, '..', 'src', 'command', 'template')
-const distTemplateDir = join(__dirname, '..', 'dist', 'command', 'template')
-mkdirSync(distTemplateDir, { recursive: true })
-cpSync(srcTemplateDir, distTemplateDir, { recursive: true })
+console.log("Copying template files...");
+const srcTemplateDir = join(rootDir, "src", "command", "template");
+const distTemplateDir = join(distDir, "command", "template");
+mkdirSync(distTemplateDir, { recursive: true });
+cpSync(srcTemplateDir, distTemplateDir, { recursive: true });
 
-console.log('Build complete!')
+console.log("Build complete!");

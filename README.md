@@ -35,6 +35,20 @@ Add to your `~/.config/opencode/tui.json` to enable the sidebar:
 
 On first run the plugin auto-creates `~/.config/opencode/forge-config.jsonc` from the bundled template.
 
+Runtime notes:
+- **Server/backend plugin** — packaged `dist/index.js` is built for Node-compatible loading.
+- **TUI plugin** — still depends on the OpenTUI/Bun runtime stack (`@opentui/core` / `bun:ffi`), so treat the sidebar as Bun/OpenTUI-bound for now.
+- If the backend still fails before the host can reach its local plugin URL, enable logging in `~/.config/opencode/forge-config.jsonc`:
+
+```jsonc
+{
+  "logging": {
+    "enabled": true,
+    "debug": true
+  }
+}
+```
+
 ## Features
 
 ### Forge

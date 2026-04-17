@@ -1,3 +1,5 @@
+import { hashStringToHex } from "../runtime/hash";
+
 const KEYWORDS = new Set([
   "if",
   "else",
@@ -121,7 +123,7 @@ export function computeMinHash(tokens: string[]): Uint32Array | null {
     const shingle = `${tokens[s]}\0${tokens[s + 1]}\0${tokens[s + 2]}`;
 
     for (let h = 0; h < NUM_HASHES; h++) {
-      const v = Number(BigInt(Bun.hash(`${String(h)}\x01${shingle}`)) & 0xffffffffn);
+      const v = Number(BigInt(`0x${hashStringToHex(`${String(h)}\x01${shingle}`).slice(0, 8)}`));
       if (v < (sig[h] as number)) sig[h] = v;
     }
   }
@@ -152,7 +154,7 @@ export function computeFragmentHashes(tokens: string[]): FragmentHash[] {
   const windowCount = tokens.length - FRAGMENT_WINDOW + 1;
   for (let i = 0; i < windowCount; i++) {
     const window = tokens.slice(i, i + FRAGMENT_WINDOW).join("\0");
-    const hash = Bun.hash(window).toString(16);
+    const hash = hashStringToHex(window);
     results.push({ hash, tokenOffset: i });
   }
 

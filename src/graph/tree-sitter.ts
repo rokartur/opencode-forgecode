@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { hashStringToHex } from "../runtime/hash";
 
 import { FileCache } from "./cache";
 import {
@@ -624,7 +625,7 @@ export class TreeSitterBackend {
 
       for (const { node, name, kind } of nodes) {
         const serialized = this.serializeShape(node, 0);
-        const hash = Bun.hash(serialized).toString(16);
+        const hash = hashStringToHex(serialized);
         const nodeCount = this.countNodes(node, 0);
         results.push({
           name,

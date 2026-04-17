@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { Database } from "../runtime/sqlite";
 import { openGraphDatabase } from "./database";
 import { RpcServer } from "./rpc";
 import { RepoMap } from "./repo-map";

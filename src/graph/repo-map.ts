@@ -1,6 +1,7 @@
 // Core RepoMap implementation - ported from soulforge
 
-import { Database, Statement } from "bun:sqlite";
+import { Database, type Statement } from "../runtime/sqlite";
+import { hashBytesToHex } from "../runtime/hash";
 import { resolve, join, dirname, extname, relative } from "path";
 import { existsSync, statSync } from "fs";
 
@@ -1171,7 +1172,7 @@ export class RepoMap {
       for (let b = 0; b < LSH_BANDS; b++) {
         const offset = b * ROWS_PER_BAND;
         const slice = mh.subarray(offset, offset + ROWS_PER_BAND);
-        const key = `${b}:${Bun.hash(new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength))}`;
+        const key = `${b}:${hashBytesToHex(new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength))}`;
         let bucket = buckets.get(key);
         if (!bucket) {
           bucket = [];

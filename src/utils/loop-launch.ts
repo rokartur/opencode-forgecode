@@ -6,7 +6,7 @@
  */
 
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import { Database } from "bun:sqlite";
+import { Database } from "../runtime/sqlite";
 import { existsSync } from "fs";
 import { join } from "path";
 import {
