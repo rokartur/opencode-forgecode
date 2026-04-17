@@ -11,29 +11,29 @@
  * Keep this list in sync with handler registration in `worker.ts`.
  */
 export const READ_ONLY_METHODS: ReadonlySet<string> = new Set([
-  "getStats",
-  "getTopFiles",
-  "getFileDependents",
-  "getFileDependencies",
-  "getFileCoChanges",
-  "getFileBlastRadius",
-  "getFileSymbols",
-  "findSymbols",
-  "searchSymbolsFts",
-  "getSymbolSignature",
-  "getCallers",
-  "getCallees",
-  "getUnusedExports",
-  "getDuplicateStructures",
-  "getNearDuplicates",
-  "getExternalPackages",
-  "getOrphanFiles",
-  "getCircularDependencies",
-  "getChangeImpact",
-  "getSymbolReferences",
-  "render",
-]);
+	'getStats',
+	'getTopFiles',
+	'getFileDependents',
+	'getFileDependencies',
+	'getFileCoChanges',
+	'getFileBlastRadius',
+	'getFileSymbols',
+	'findSymbols',
+	'searchSymbolsFts',
+	'getSymbolSignature',
+	'getCallers',
+	'getCallees',
+	'getUnusedExports',
+	'getDuplicateStructures',
+	'getNearDuplicates',
+	'getExternalPackages',
+	'getOrphanFiles',
+	'getCircularDependencies',
+	'getChangeImpact',
+	'getSymbolReferences',
+	'render',
+])
 
 export function isReadOnlyMethod(method: string): boolean {
-  return READ_ONLY_METHODS.has(method);
+	return READ_ONLY_METHODS.has(method)
 }

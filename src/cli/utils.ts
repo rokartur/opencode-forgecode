@@ -1,182 +1,178 @@
-import { Database } from "../runtime/sqlite";
-import { existsSync, readFileSync } from "fs";
-import { homedir, platform } from "os";
-import { join, basename } from "path";
-import { execSync } from "child_process";
-import { createInterface } from "readline";
-import { openForgeDatabase } from "../storage/database";
+import { Database } from '../runtime/sqlite'
+import { existsSync, readFileSync } from 'fs'
+import { homedir, platform } from 'os'
+import { join, basename } from 'path'
+import { execSync } from 'child_process'
+import { createInterface } from 'readline'
+import { openForgeDatabase } from '../storage/database'
 
 function resolveDefaultDbPath(): string {
-  const localForgePath = join(process.cwd(), ".opencode", "state", "opencode", "forge", "graph.db");
-  if (existsSync(localForgePath)) {
-    return localForgePath;
-  }
+	const localForgePath = join(process.cwd(), '.opencode', 'state', 'opencode', 'forge', 'graph.db')
+	if (existsSync(localForgePath)) {
+		return localForgePath
+	}
 
-  const localPath = join(process.cwd(), ".opencode", "state", "opencode", "graph", "graph.db");
-  if (existsSync(localPath)) {
-    return localPath;
-  }
+	const localPath = join(process.cwd(), '.opencode', 'state', 'opencode', 'graph', 'graph.db')
+	if (existsSync(localPath)) {
+		return localPath
+	}
 
-  const defaultBase = join(homedir(), platform() === "win32" ? "AppData" : ".local", "share");
-  const xdgDataHome = process.env["XDG_DATA_HOME"] || defaultBase;
-  const forgeDir = join(xdgDataHome, "opencode", "forge");
-  if (existsSync(join(forgeDir, "graph.db"))) {
-    return join(forgeDir, "graph.db");
-  }
-  const dataDir = join(xdgDataHome, "opencode", "graph");
-  return join(dataDir, "graph.db");
+	const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.local', 'share')
+	const xdgDataHome = process.env['XDG_DATA_HOME'] || defaultBase
+	const forgeDir = join(xdgDataHome, 'opencode', 'forge')
+	if (existsSync(join(forgeDir, 'graph.db'))) {
+		return join(forgeDir, 'graph.db')
+	}
+	const dataDir = join(xdgDataHome, 'opencode', 'graph')
+	return join(dataDir, 'graph.db')
 }
 
 export function getGitProjectId(dir?: string): string | null {
-  try {
-    const execOpts = dir
-      ? { encoding: "utf-8" as const, cwd: dir }
-      : { encoding: "utf-8" as const };
-    const repoRoot = execSync("git rev-parse --show-toplevel", execOpts).trim();
-    if (!repoRoot) return null;
+	try {
+		const execOpts = dir ? { encoding: 'utf-8' as const, cwd: dir } : { encoding: 'utf-8' as const }
+		const repoRoot = execSync('git rev-parse --show-toplevel', execOpts).trim()
+		if (!repoRoot) return null
 
-    const cacheFile = join(repoRoot, ".git", "opencode");
-    if (existsSync(cacheFile)) {
-      const cachedId = readFileSync(cacheFile, "utf-8").trim();
-      if (cachedId) return cachedId;
-    }
+		const cacheFile = join(repoRoot, '.git', 'opencode')
+		if (existsSync(cacheFile)) {
+			const cachedId = readFileSync(cacheFile, 'utf-8').trim()
+			if (cachedId) return cachedId
+		}
 
-    const output = execSync("git rev-list --max-parents=0 --all", execOpts).trim();
-    if (!output) return null;
+		const output = execSync('git rev-list --max-parents=0 --all', execOpts).trim()
+		if (!output) return null
 
-    const commits = output.split("\n").filter(Boolean).sort();
-    return commits[0] || null;
-  } catch {
-    return null;
-  }
+		const commits = output.split('\n').filter(Boolean).sort()
+		return commits[0] || null
+	} catch {
+		return null
+	}
 }
 
 export function openDatabase(dbPath?: string): Database {
-  const resolvedPath = dbPath || resolveDefaultDbPath();
+	const resolvedPath = dbPath || resolveDefaultDbPath()
 
-  if (!existsSync(resolvedPath)) {
-    console.error(
-      `Database not found at ${resolvedPath}. Run OpenCode first to initialize OpenCode Forge.`,
-    );
-    process.exit(1);
-  }
+	if (!existsSync(resolvedPath)) {
+		console.error(`Database not found at ${resolvedPath}. Run OpenCode first to initialize OpenCode Forge.`)
+		process.exit(1)
+	}
 
-  return openForgeDatabase(resolvedPath);
+	return openForgeDatabase(resolvedPath)
 }
 
 export function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen - 3) + "...";
+	if (str.length <= maxLen) return str
+	return str.slice(0, maxLen - 3) + '...'
 }
 
 export function confirm(message: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
+	return new Promise(resolve => {
+		const rl = createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		})
 
-    rl.question(`${message} (y/n): `, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === "y");
-    });
-  });
+		rl.question(`${message} (y/n): `, answer => {
+			rl.close()
+			resolve(answer.toLowerCase() === 'y')
+		})
+	})
 }
 
 export function resolveProjectNames(): Map<string, string> {
-  const nameMap = new Map<string, string>();
+	const nameMap = new Map<string, string>()
 
-  try {
-    const defaultBase = join(homedir(), platform() === "win32" ? "AppData" : ".local", "share");
-    const xdgDataHome = process.env["XDG_DATA_HOME"] || defaultBase;
-    const opencodePath = join(xdgDataHome, "opencode", "opencode.db");
+	try {
+		const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.local', 'share')
+		const xdgDataHome = process.env['XDG_DATA_HOME'] || defaultBase
+		const opencodePath = join(xdgDataHome, 'opencode', 'opencode.db')
 
-    if (!existsSync(opencodePath)) return nameMap;
+		if (!existsSync(opencodePath)) return nameMap
 
-    const db = new Database(opencodePath, { readonly: true });
+		const db = new Database(opencodePath, { readonly: true })
 
-    try {
-      const rows = db.prepare("SELECT id, worktree FROM project").all() as Array<{
-        id: string;
-        worktree: string;
-      }>;
+		try {
+			const rows = db.prepare('SELECT id, worktree FROM project').all() as Array<{
+				id: string
+				worktree: string
+			}>
 
-      for (const row of rows) {
-        nameMap.set(row.id, basename(row.worktree));
-      }
-    } finally {
-      db.close();
-    }
-  } catch {
-    // opencode.db may not exist or have different schema — graceful fallback
-  }
+			for (const row of rows) {
+				nameMap.set(row.id, basename(row.worktree))
+			}
+		} finally {
+			db.close()
+		}
+	} catch {
+		// opencode.db may not exist or have different schema — graceful fallback
+	}
 
-  return nameMap;
+	return nameMap
 }
 
 export function resolveProjectIdByName(name: string): string | null {
-  try {
-    const defaultBase = join(homedir(), platform() === "win32" ? "AppData" : ".local", "share");
-    const xdgDataHome = process.env["XDG_DATA_HOME"] || defaultBase;
-    const opencodePath = join(xdgDataHome, "opencode", "opencode.db");
+	try {
+		const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.local', 'share')
+		const xdgDataHome = process.env['XDG_DATA_HOME'] || defaultBase
+		const opencodePath = join(xdgDataHome, 'opencode', 'opencode.db')
 
-    if (!existsSync(opencodePath)) return null;
+		if (!existsSync(opencodePath)) return null
 
-    const db = new Database(opencodePath, { readonly: true });
+		const db = new Database(opencodePath, { readonly: true })
 
-    try {
-      const rows = db.prepare("SELECT id, worktree FROM project").all() as Array<{
-        id: string;
-        worktree: string;
-      }>;
+		try {
+			const rows = db.prepare('SELECT id, worktree FROM project').all() as Array<{
+				id: string
+				worktree: string
+			}>
 
-      for (const row of rows) {
-        if (basename(row.worktree) === name) return row.id;
-      }
-    } finally {
-      db.close();
-    }
-  } catch {
-    return null;
-  }
+			for (const row of rows) {
+				if (basename(row.worktree) === name) return row.id
+			}
+		} finally {
+			db.close()
+		}
+	} catch {
+		return null
+	}
 
-  return null;
+	return null
 }
 
 interface GlobalOptions {
-  dbPath?: string;
-  projectId?: string;
-  dir?: string;
-  help?: boolean;
+	dbPath?: string
+	projectId?: string
+	dir?: string
+	help?: boolean
 }
 
 interface ParsedGlobalOptions {
-  globalOpts: GlobalOptions;
-  remainingArgs: string[];
+	globalOpts: GlobalOptions
+	remainingArgs: string[]
 }
 
 export function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
-  const globalOpts: GlobalOptions = {};
-  const remainingArgs: string[] = [];
+	const globalOpts: GlobalOptions = {}
+	const remainingArgs: string[] = []
 
-  let i = 0;
-  while (i < args.length) {
-    const arg = args[i];
+	let i = 0
+	while (i < args.length) {
+		const arg = args[i]
 
-    if (arg === "--db-path") {
-      globalOpts.dbPath = args[++i];
-    } else if (arg === "--project" || arg === "-p") {
-      globalOpts.projectId = args[++i];
-    } else if (arg === "--dir" || arg === "-d") {
-      globalOpts.dir = args[++i];
-    } else if (arg === "--help" || arg === "-h") {
-      globalOpts.help = true;
-    } else {
-      remainingArgs.push(arg);
-    }
+		if (arg === '--db-path') {
+			globalOpts.dbPath = args[++i]
+		} else if (arg === '--project' || arg === '-p') {
+			globalOpts.projectId = args[++i]
+		} else if (arg === '--dir' || arg === '-d') {
+			globalOpts.dir = args[++i]
+		} else if (arg === '--help' || arg === '-h') {
+			globalOpts.help = true
+		} else {
+			remainingArgs.push(arg)
+		}
 
-    i++;
-  }
+		i++
+	}
 
-  return { globalOpts, remainingArgs };
+	return { globalOpts, remainingArgs }
 }

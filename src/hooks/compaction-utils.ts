@@ -1,15 +1,15 @@
 interface PromptResponsePart {
-  type: string
-  text?: string
+	type: string
+	text?: string
 }
 
 interface SessionMessage {
-  info: { role: string }
-  parts: PromptResponsePart[]
+	info: { role: string }
+	parts: PromptResponsePart[]
 }
 
 export function buildCustomCompactionPrompt(): string {
-  return `You are generating a continuation context for a coding session. Your summary will be the ONLY context after compaction.
+	return `You are generating a continuation context for a coding session. Your summary will be the ONLY context after compaction.
 Preserve everything needed for seamless continuation.
 
 ## CRITICAL - Preserve These Verbatim
@@ -40,70 +40,66 @@ Preserve everything needed for seamless continuation.
 }
 
 export function formatCompactionDiagnostics(stats: {
-  conventions: number
-  decisions: number
-  tokensInjected: number
+	conventions: number
+	decisions: number
+	tokensInjected: number
 }): string {
-  const parts: string[] = []
+	const parts: string[] = []
 
-  if (stats.conventions > 0) {
-    parts.push(`${stats.conventions} convention${stats.conventions !== 1 ? 's' : ''}`)
-  }
+	if (stats.conventions > 0) {
+		parts.push(`${stats.conventions} convention${stats.conventions !== 1 ? 's' : ''}`)
+	}
 
-  if (stats.decisions > 0) {
-    parts.push(`${stats.decisions} decision${stats.decisions !== 1 ? 's' : ''}`)
-  }
+	if (stats.decisions > 0) {
+		parts.push(`${stats.decisions} decision${stats.decisions !== 1 ? 's' : ''}`)
+	}
 
-  if (parts.length === 0) return ''
+	if (parts.length === 0) return ''
 
-  return `> **Compaction preserved:** ${parts.join(', ')} (~${stats.tokensInjected} tokens injected)`
+	return `> **Compaction preserved:** ${parts.join(', ')} (~${stats.tokensInjected} tokens injected)`
 }
 
 export function extractCompactionSummary(messages: SessionMessage[]): string | null {
-  const reversed = [...messages].reverse()
-  for (const msg of reversed) {
-    if (msg.info.role !== 'assistant') continue
-    const textParts = msg.parts
-      .filter((p): p is PromptResponsePart & { text: string } => p.type === 'text' && typeof p.text === 'string')
-      .map(p => p.text)
-    if (textParts.length > 0) return textParts.join('\n')
-  }
-  return null
+	const reversed = [...messages].reverse()
+	for (const msg of reversed) {
+		if (msg.info.role !== 'assistant') continue
+		const textParts = msg.parts
+			.filter((p): p is PromptResponsePart & { text: string } => p.type === 'text' && typeof p.text === 'string')
+			.map(p => p.text)
+		if (textParts.length > 0) return textParts.join('\n')
+	}
+	return null
 }
 
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
+	return Math.ceil(text.length / 4)
 }
 
-export function trimToTokenBudget(
-  content: string,
-  maxTokens: number,
-  priority: 'high' | 'medium' | 'low'
-): string {
-  const maxChars = maxTokens * 4
-  if (content.length <= maxChars) return content
+export function trimToTokenBudget(content: string, maxTokens: number, priority: 'high' | 'medium' | 'low'): string {
+	const maxChars = maxTokens * 4
+	if (content.length <= maxChars) return content
 
-  if (priority === 'low') {
-    return content.slice(0, maxChars) + '...'
-  }
+	if (priority === 'low') {
+		return content.slice(0, maxChars) + '...'
+	}
 
-  const lines = content.split('\n')
-  const trimmed: string[] = []
+	const lines = content.split('\n')
+	const trimmed: string[] = []
 
-  let currentChars = 0
-  const skipFromEnd = priority === 'medium' ? Math.floor(lines.length * 0.2) : 0
+	let currentChars = 0
+	const skipFromEnd = priority === 'medium' ? Math.floor(lines.length * 0.2) : 0
 
-  const linesToUse = skipFromEnd > 0 ? lines.slice(0, -skipFromEnd) : lines
+	const linesToUse = skipFromEnd > 0 ? lines.slice(0, -skipFromEnd) : lines
 
-  for (const line of linesToUse) {
-    if (currentChars + line.length + 1 > maxChars) break
-    trimmed.push(line)
-    currentChars += line.length + 1
-  }
+	for (const line of linesToUse) {
+		if (currentChars + line.length + 1 > maxChars) break
+		trimmed.push(line)
+		currentChars += line.length + 1
+	}
 
-  if (trimmed.length < linesToUse.length) {
-    trimmed.push('...')
-  }
+	if (trimmed.length < linesToUse.length) {
+		trimmed.push('...')
+	}
 
-  return trimmed.join('\n')
+	return trimmed.join('\n')
 }

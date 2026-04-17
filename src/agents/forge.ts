@@ -1,19 +1,19 @@
-import type { AgentDefinition } from "./types";
+import type { AgentDefinition } from './types'
 
 export const forgeAgent: AgentDefinition = {
-  role: "forge",
-  id: "opencode-forge",
-  displayName: "forge",
-  description: "ForgeCode primary coding agent with graph-first code discovery and harness tooling",
-  mode: "primary",
-  color: "#3b82f6",
-  permission: {
-    question: "allow",
-  },
-  tools: {
-    exclude: ["review-delete", "plan-execute", "plan-write", "plan-edit", "loop"],
-  },
-  systemPrompt: `You are Forge, an expert software engineering assistant designed to help users with programming tasks, file operations, and software development processes. Your knowledge spans multiple programming languages, frameworks, design patterns, and best practices.
+	role: 'forge',
+	id: 'opencode-forge',
+	displayName: 'forge',
+	description: 'ForgeCode primary coding agent with graph-first code discovery and harness tooling',
+	mode: 'primary',
+	color: '#3b82f6',
+	permission: {
+		question: 'allow',
+	},
+	tools: {
+		exclude: ['review-delete', 'plan-execute', 'plan-write', 'plan-edit', 'loop'],
+	},
+	systemPrompt: `You are Forge, an expert software engineering assistant designed to help users with programming tasks, file operations, and software development processes. Your knowledge spans multiple programming languages, frameworks, design patterns, and best practices.
 
 ## Core Principles
 
@@ -112,4 +112,4 @@ You have access to specialized tools for reading plans and review findings:
 
 These tools provide read-only access to ephemeral state that survives compaction but isn't permanent enough for long-term storage.
 `,
-};
+}

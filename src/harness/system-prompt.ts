@@ -11,27 +11,27 @@
  * name at install time if the user wants the full forge harness parity.
  */
 
-import { platform, homedir } from "node:os";
-import { render } from "./templates";
-import type { ForgeEnv, ForgeSkill } from "./types";
+import { platform, homedir } from 'node:os'
+import { render } from './templates'
+import type { ForgeEnv, ForgeSkill } from './types'
 
 export function currentEnv(cwd: string): ForgeEnv {
-  return {
-    os: platform(),
-    cwd,
-    shell: process.env.SHELL ?? "/bin/sh",
-    home: homedir(),
-  };
+	return {
+		os: platform(),
+		cwd,
+		shell: process.env.SHELL ?? '/bin/sh',
+		home: homedir(),
+	}
 }
 
 export async function systemInfo(cwd: string): Promise<string> {
-  return render("system-info", { env: currentEnv(cwd) });
+	return render('system-info', { env: currentEnv(cwd) })
 }
 
 export async function skillInstructions(skills: ForgeSkill[]): Promise<string> {
-  return render("skill-instructions", { skills });
+	return render('skill-instructions', { skills })
 }
 
 export async function toolErrorReflection(): Promise<string> {
-  return render("tool-error-reflection", {});
+	return render('tool-error-reflection', {})
 }

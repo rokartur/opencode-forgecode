@@ -7,405 +7,408 @@ import type { Logger } from '../src/types'
 const TEST_DIR = '/tmp/opencode-graph-test-' + Date.now()
 
 function createTestLogger(): Logger {
-  return {
-    log: () => {},
-    error: () => {},
-    debug: () => {},
-  }
+	return {
+		log: () => {},
+		error: () => {},
+		debug: () => {},
+	}
 }
 
 describe('GraphService debounce behavior', () => {
-  let testDir: string
-  let testProjectId: string
+	let testDir: string
+	let testProjectId: string
 
-  beforeEach(() => {
-    testDir = TEST_DIR + '-' + Math.random().toString(36).slice(2)
-    testProjectId = 'test-project-' + Date.now()
-    mkdirSync(testDir, { recursive: true })
-  })
+	beforeEach(() => {
+		testDir = TEST_DIR + '-' + Math.random().toString(36).slice(2)
+		testProjectId = 'test-project-' + Date.now()
+		mkdirSync(testDir, { recursive: true })
+	})
 
-  afterEach(async () => {
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true })
-    }
-  })
+	afterEach(async () => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true, force: true })
+		}
+	})
 
-  test('should coalesce multiple changes to the same path within debounce window', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+	test('should coalesce multiple changes to the same path within debounce window', async () => {
+		const logger = createTestLogger()
 
-    const testFile = join(testDir, 'test.ts')
-    writeFileSync(testFile, 'export const x = 1')
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
 
-    // Trigger a full scan first
-    await service.scan()
+		const testFile = join(testDir, 'test.ts')
+		writeFileSync(testFile, 'export const x = 1')
 
-    // Rapid-fire changes to same file
-    service.onFileChanged(testFile)
-    service.onFileChanged(testFile)
-    service.onFileChanged(testFile)
+		// Trigger a full scan first
+		await service.scan()
 
-    // Wait for debounce + processing
-    await new Promise(resolve => setTimeout(resolve, 300))
+		// Rapid-fire changes to same file
+		service.onFileChanged(testFile)
+		service.onFileChanged(testFile)
+		service.onFileChanged(testFile)
 
-    // Get stats to verify the file was indexed
-    const stats = await service.getStats()
-    expect(stats.files).toBeGreaterThanOrEqual(1)
-    
-    await service.close()
-  })
+		// Wait for debounce + processing
+		await new Promise(resolve => setTimeout(resolve, 300))
 
-  test('should handle multiple distinct paths in one debounce window', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+		// Get stats to verify the file was indexed
+		const stats = await service.getStats()
+		expect(stats.files).toBeGreaterThanOrEqual(1)
 
-    const file1 = join(testDir, 'file1.ts')
-    const file2 = join(testDir, 'file2.ts')
-    writeFileSync(file1, 'export const a = 1')
-    writeFileSync(file2, 'export const b = 2')
+		await service.close()
+	})
 
-    service.onFileChanged(file1)
-    service.onFileChanged(file2)
+	test('should handle multiple distinct paths in one debounce window', async () => {
+		const logger = createTestLogger()
 
-    // Wait for debounce
-    await new Promise(resolve => setTimeout(resolve, 200))
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
 
-    await service.close()
-  })
+		const file1 = join(testDir, 'file1.ts')
+		const file2 = join(testDir, 'file2.ts')
+		writeFileSync(file1, 'export const a = 1')
+		writeFileSync(file2, 'export const b = 2')
 
-  test('should ignore non-project paths', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+		service.onFileChanged(file1)
+		service.onFileChanged(file2)
 
-    const outsidePath = '/tmp/outside-project.ts'
-    service.onFileChanged(outsidePath)
+		// Wait for debounce
+		await new Promise(resolve => setTimeout(resolve, 200))
 
-    // Should not throw or crash
-    await new Promise(resolve => setTimeout(resolve, 150))
+		await service.close()
+	})
 
-    await service.close()
-  })
+	test('should ignore non-project paths', async () => {
+		const logger = createTestLogger()
 
-  test('should ignore paths in ignored directories', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
 
-    const nodeModulesPath = join(testDir, 'node_modules', 'pkg', 'index.js')
-    service.onFileChanged(nodeModulesPath)
+		const outsidePath = '/tmp/outside-project.ts'
+		service.onFileChanged(outsidePath)
 
-    // Should be ignored
-    await new Promise(resolve => setTimeout(resolve, 150))
+		// Should not throw or crash
+		await new Promise(resolve => setTimeout(resolve, 150))
 
-    await service.close()
-  })
+		await service.close()
+	})
 
-  test('should not lose changes arriving during flush', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 50,
-    })
+	test('should ignore paths in ignored directories', async () => {
+		const logger = createTestLogger()
 
-    const file1 = join(testDir, 'file1.ts')
-    const file2 = join(testDir, 'file2.ts')
-    writeFileSync(file1, 'export const a = 1')
-    writeFileSync(file2, 'export const b = 2')
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
 
-    // First change
-    service.onFileChanged(file1)
-    
-    // Wait for first flush to start
-    await new Promise(resolve => setTimeout(resolve, 60))
-    
-    // Second change during/after flush
-    service.onFileChanged(file2)
+		const nodeModulesPath = join(testDir, 'node_modules', 'pkg', 'index.js')
+		service.onFileChanged(nodeModulesPath)
 
-    // Wait for second flush
-    await new Promise(resolve => setTimeout(resolve, 100))
+		// Should be ignored
+		await new Promise(resolve => setTimeout(resolve, 150))
 
-    await service.close()
-  })
+		await service.close()
+	})
 
-  test('should handle non-indexable extensions', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+	test('should not lose changes arriving during flush', async () => {
+		const logger = createTestLogger()
 
-    const logFile = join(testDir, 'app.log')
-    service.onFileChanged(logFile)
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 50,
+		})
 
-    // Should be ignored without error
-    await new Promise(resolve => setTimeout(resolve, 150))
+		const file1 = join(testDir, 'file1.ts')
+		const file2 = join(testDir, 'file2.ts')
+		writeFileSync(file1, 'export const a = 1')
+		writeFileSync(file2, 'export const b = 2')
 
-    await service.close()
-  })
+		// First change
+		service.onFileChanged(file1)
+
+		// Wait for first flush to start
+		await new Promise(resolve => setTimeout(resolve, 60))
+
+		// Second change during/after flush
+		service.onFileChanged(file2)
+
+		// Wait for second flush
+		await new Promise(resolve => setTimeout(resolve, 100))
+
+		await service.close()
+	})
+
+	test('should handle non-indexable extensions', async () => {
+		const logger = createTestLogger()
+
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
+
+		const logFile = join(testDir, 'app.log')
+		service.onFileChanged(logFile)
+
+		// Should be ignored without error
+		await new Promise(resolve => setTimeout(resolve, 150))
+
+		await service.close()
+	})
 })
 
 // Note: Full watcher lifecycle tests require complete graph DB initialization
 // which is tested indirectly through integration tests
 
 describe('GraphService status emission', () => {
-  let testDir: string
-  let testProjectId: string
+	let testDir: string
+	let testProjectId: string
 
-  beforeEach(() => {
-    testDir = TEST_DIR + '-' + Math.random().toString(36).slice(2)
-    testProjectId = 'test-project-' + Date.now()
-    mkdirSync(testDir, { recursive: true })
-  })
+	beforeEach(() => {
+		testDir = TEST_DIR + '-' + Math.random().toString(36).slice(2)
+		testProjectId = 'test-project-' + Date.now()
+		mkdirSync(testDir, { recursive: true })
+	})
 
-  afterEach(async () => {
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true })
-    }
-  })
+	afterEach(async () => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true, force: true })
+		}
+	})
 
-  test('should emit indexing status before scan completion', async () => {
-    const logger = createTestLogger()
-    const statusCalls: Array<{ state: string; stats?: unknown }> = []
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-      onStatusChange: (state, stats) => {
-        statusCalls.push({ state, stats })
-      },
-    })
+	test('should emit indexing status before scan completion', async () => {
+		const logger = createTestLogger()
+		const statusCalls: Array<{ state: string; stats?: unknown }> = []
 
-    await service.scan()
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+			onStatusChange: (state, stats) => {
+				statusCalls.push({ state, stats })
+			},
+		})
 
-    // Should have received initializing, then indexing, then ready
-    expect(statusCalls.length).toBeGreaterThanOrEqual(2)
-    
-    // Find the indexing call - it should come before the ready call
-    const indexingIndex = statusCalls.findIndex(call => call.state === 'indexing')
-    const readyIndex = statusCalls.findIndex(call => call.state === 'ready')
-    
-    expect(indexingIndex).toBeGreaterThanOrEqual(0)
-    expect(readyIndex).toBeGreaterThanOrEqual(0)
-    expect(indexingIndex).toBeLessThan(readyIndex)
-    expect(statusCalls[readyIndex].stats).toBeDefined()
-    
-    await service.close()
-  })
+		await service.scan()
 
-  test('should emit ready status with stats after scan completes', async () => {
-    const logger = createTestLogger()
-    let finalStatus: { state: string; stats?: unknown } | null = null
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-      onStatusChange: (state, stats) => {
-        finalStatus = { state, stats }
-      },
-    })
+		// Should have received initializing, then indexing, then ready
+		expect(statusCalls.length).toBeGreaterThanOrEqual(2)
 
-    await service.scan()
+		// Find the indexing call - it should come before the ready call
+		const indexingIndex = statusCalls.findIndex(call => call.state === 'indexing')
+		const readyIndex = statusCalls.findIndex(call => call.state === 'ready')
 
-    expect(finalStatus).not.toBeNull()
-    expect(finalStatus!.state).toBe('ready')
-    expect(finalStatus!.stats).toBeDefined()
-    expect(typeof (finalStatus!.stats as any).files).toBe('number')
-    
-    await service.close()
-  })
+		expect(indexingIndex).toBeGreaterThanOrEqual(0)
+		expect(readyIndex).toBeGreaterThanOrEqual(0)
+		expect(indexingIndex).toBeLessThan(readyIndex)
+		expect(statusCalls[readyIndex].stats).toBeDefined()
 
-  test('should emit refreshed ready status after watcher flushes a file change', async () => {
-    const logger = createTestLogger()
-    const statusCalls: Array<{ state: string; stats?: { files: number; symbols: number; edges: number; calls: number } }> = []
-    const filePath = join(testDir, 'index.ts')
+		await service.close()
+	})
 
-    writeFileSync(filePath, 'export const value = 1\n')
+	test('should emit ready status with stats after scan completes', async () => {
+		const logger = createTestLogger()
+		let finalStatus: { state: string; stats?: unknown } | null = null
 
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 25,
-      onStatusChange: (state, stats) => {
-        statusCalls.push({ state, stats })
-      },
-    })
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+			onStatusChange: (state, stats) => {
+				finalStatus = { state, stats }
+			},
+		})
 
-    await service.scan()
-    const readyCallsAfterScan = statusCalls.filter((call) => call.state === 'ready').length
+		await service.scan()
 
-    writeFileSync(filePath, 'export const value = 2\n')
-    service.onFileChanged(filePath)
-    await new Promise((resolve) => setTimeout(resolve, 100))
+		expect(finalStatus).not.toBeNull()
+		expect(finalStatus!.state).toBe('ready')
+		expect(finalStatus!.stats).toBeDefined()
+		expect(typeof (finalStatus!.stats as any).files).toBe('number')
 
-    const readyCallsAfterFlush = statusCalls.filter((call) => call.state === 'ready').length
-    expect(readyCallsAfterFlush).toBeGreaterThan(readyCallsAfterScan)
+		await service.close()
+	})
 
-    await service.close()
-  })
+	test('should emit refreshed ready status after watcher flushes a file change', async () => {
+		const logger = createTestLogger()
+		const statusCalls: Array<{
+			state: string
+			stats?: { files: number; symbols: number; edges: number; calls: number }
+		}> = []
+		const filePath = join(testDir, 'index.ts')
 
-  test('REGRESSION: two graph services with same projectId but different cwd must not share graph cache', async () => {
-    const logger = createTestLogger()
-    const sharedDataDir = join(testDir, 'shared-data')
-    mkdirSync(sharedDataDir, { recursive: true })
+		writeFileSync(filePath, 'export const value = 1\n')
 
-    const rootDir = join(testDir, 'repo-root')
-    const worktreeDir = join(testDir, 'worktree')
-    mkdirSync(rootDir, { recursive: true })
-    mkdirSync(worktreeDir, { recursive: true })
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 25,
+			onStatusChange: (state, stats) => {
+				statusCalls.push({ state, stats })
+			},
+		})
 
-    const rootFile = join(rootDir, 'root-file.ts')
-    const worktreeFile = join(worktreeDir, 'worktree-file.ts')
-    writeFileSync(rootFile, 'export const root = 1')
-    writeFileSync(worktreeFile, 'export const worktree = 2')
+		await service.scan()
+		const readyCallsAfterScan = statusCalls.filter(call => call.state === 'ready').length
 
-    const sharedProjectId = 'shared-project-' + Date.now()
+		writeFileSync(filePath, 'export const value = 2\n')
+		service.onFileChanged(filePath)
+		await new Promise(resolve => setTimeout(resolve, 100))
 
-    const service1 = createGraphService({
-      projectId: sharedProjectId,
-      dataDir: sharedDataDir,
-      cwd: rootDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+		const readyCallsAfterFlush = statusCalls.filter(call => call.state === 'ready').length
+		expect(readyCallsAfterFlush).toBeGreaterThan(readyCallsAfterScan)
 
-    const service2 = createGraphService({
-      projectId: sharedProjectId,
-      dataDir: sharedDataDir,
-      cwd: worktreeDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+		await service.close()
+	})
 
-    await service1.scan()
-    await service2.scan()
+	test('REGRESSION: two graph services with same projectId but different cwd must not share graph cache', async () => {
+		const logger = createTestLogger()
+		const sharedDataDir = join(testDir, 'shared-data')
+		mkdirSync(sharedDataDir, { recursive: true })
 
-    const stats1 = await service1.getStats()
-    const stats2 = await service2.getStats()
+		const rootDir = join(testDir, 'repo-root')
+		const worktreeDir = join(testDir, 'worktree')
+		mkdirSync(rootDir, { recursive: true })
+		mkdirSync(worktreeDir, { recursive: true })
 
-    expect(stats1.files).toBeGreaterThanOrEqual(1)
-    expect(stats2.files).toBeGreaterThanOrEqual(1)
+		const rootFile = join(rootDir, 'root-file.ts')
+		const worktreeFile = join(worktreeDir, 'worktree-file.ts')
+		writeFileSync(rootFile, 'export const root = 1')
+		writeFileSync(worktreeFile, 'export const worktree = 2')
 
-    const allFiles1 = await service1.render({ maxFiles: 100 })
-    const allFiles2 = await service2.render({ maxFiles: 100 })
+		const sharedProjectId = 'shared-project-' + Date.now()
 
-    expect(allFiles1.paths.some(p => p.includes('root-file.ts'))).toBe(true)
-    expect(allFiles1.paths.some(p => p.includes('worktree-file.ts'))).toBe(false)
+		const service1 = createGraphService({
+			projectId: sharedProjectId,
+			dataDir: sharedDataDir,
+			cwd: rootDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
 
-    expect(allFiles2.paths.some(p => p.includes('worktree-file.ts'))).toBe(true)
-    expect(allFiles2.paths.some(p => p.includes('root-file.ts'))).toBe(false)
+		const service2 = createGraphService({
+			projectId: sharedProjectId,
+			dataDir: sharedDataDir,
+			cwd: worktreeDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
 
-    await service1.close()
-    await service2.close()
-  })
+		await service1.scan()
+		await service2.scan()
 
-  test('REGRESSION: close() during pending debounce completes without awaiting queued flush', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 5000,
-    })
+		const stats1 = await service1.getStats()
+		const stats2 = await service2.getStats()
 
-    await service.scan()
+		expect(stats1.files).toBeGreaterThanOrEqual(1)
+		expect(stats2.files).toBeGreaterThanOrEqual(1)
 
-    const file1 = join(testDir, 'file1.ts')
-    writeFileSync(file1, 'export const a = 1')
+		const allFiles1 = await service1.render({ maxFiles: 100 })
+		const allFiles2 = await service2.render({ maxFiles: 100 })
 
-    service.onFileChanged(file1)
+		expect(allFiles1.paths.some(p => p.includes('root-file.ts'))).toBe(true)
+		expect(allFiles1.paths.some(p => p.includes('worktree-file.ts'))).toBe(false)
 
-    await new Promise(resolve => setTimeout(resolve, 50))
+		expect(allFiles2.paths.some(p => p.includes('worktree-file.ts'))).toBe(true)
+		expect(allFiles2.paths.some(p => p.includes('root-file.ts'))).toBe(false)
 
-    const closePromise = service.close()
+		await service1.close()
+		await service2.close()
+	})
 
-    await Promise.race([
-      closePromise.then(() => 'closed'),
-      new Promise(resolve => setTimeout(() => resolve('timeout'), 1000)),
-    ])
+	test('REGRESSION: close() during pending debounce completes without awaiting queued flush', async () => {
+		const logger = createTestLogger()
 
-    expect(service.ready).toBe(false)
-  })
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 5000,
+		})
 
-  test('REGRESSION: onFileChanged after shutdown start is ignored', async () => {
-    const logger = createTestLogger()
-    
-    const service = createGraphService({
-      projectId: testProjectId,
-      dataDir: testDir,
-      cwd: testDir,
-      logger,
-      watch: false,
-      debounceMs: 100,
-    })
+		await service.scan()
 
-    await service.scan()
+		const file1 = join(testDir, 'file1.ts')
+		writeFileSync(file1, 'export const a = 1')
 
-    await service.close()
+		service.onFileChanged(file1)
 
-    const file2 = join(testDir, 'file2.ts')
-    writeFileSync(file2, 'export const b = 2')
+		await new Promise(resolve => setTimeout(resolve, 50))
 
-    expect(() => {
-      service.onFileChanged(file2)
-    }).not.toThrow()
+		const closePromise = service.close()
 
-    expect(service.ready).toBe(false)
-  })
+		await Promise.race([
+			closePromise.then(() => 'closed'),
+			new Promise(resolve => setTimeout(() => resolve('timeout'), 1000)),
+		])
+
+		expect(service.ready).toBe(false)
+	})
+
+	test('REGRESSION: onFileChanged after shutdown start is ignored', async () => {
+		const logger = createTestLogger()
+
+		const service = createGraphService({
+			projectId: testProjectId,
+			dataDir: testDir,
+			cwd: testDir,
+			logger,
+			watch: false,
+			debounceMs: 100,
+		})
+
+		await service.scan()
+
+		await service.close()
+
+		const file2 = join(testDir, 'file2.ts')
+		writeFileSync(file2, 'export const b = 2')
+
+		expect(() => {
+			service.onFileChanged(file2)
+		}).not.toThrow()
+
+		expect(service.ready).toBe(false)
+	})
 })

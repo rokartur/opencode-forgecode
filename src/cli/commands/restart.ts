@@ -1,301 +1,294 @@
-import type { LoopState } from "../../services/loop";
-import { buildCompletionSignalInstructions } from "../../services/loop";
-import { buildLoopPermissionRuleset } from "../../constants/loop";
-import { agents } from "../../agents";
-import { openDatabase, confirm } from "../utils";
-import { findPartialMatch } from "../../utils/partial-match";
-import { createOpencodeClient } from "@opencode-ai/sdk/v2";
-import { loadPluginConfig } from "../../setup";
+import type { LoopState } from '../../services/loop'
+import { buildCompletionSignalInstructions } from '../../services/loop'
+import { buildLoopPermissionRuleset } from '../../constants/loop'
+import { agents } from '../../agents'
+import { openDatabase, confirm } from '../utils'
+import { findPartialMatch } from '../../utils/partial-match'
+import { createOpencodeClient } from '@opencode-ai/sdk/v2'
+import { loadPluginConfig } from '../../setup'
 
 export interface RestartArgs {
-  dbPath?: string;
-  resolvedProjectId?: string;
-  name?: string;
-  force?: boolean;
-  server?: string;
+	dbPath?: string
+	resolvedProjectId?: string
+	name?: string
+	force?: boolean
+	server?: string
 }
 
 function createStatusClient(serverUrl: string, directory: string) {
-  const url = new URL(serverUrl);
-  const password = url.password || process.env["OPENCODE_SERVER_PASSWORD"];
-  const cleanUrl = new URL(url.toString());
-  cleanUrl.username = "";
-  cleanUrl.password = "";
-  const clientConfig: Parameters<typeof createOpencodeClient>[0] = {
-    baseUrl: cleanUrl.toString(),
-    directory,
-  };
-  if (password) {
-    clientConfig.headers = {
-      Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
-    };
-  }
-  return createOpencodeClient(clientConfig);
+	const url = new URL(serverUrl)
+	const password = url.password || process.env['OPENCODE_SERVER_PASSWORD']
+	const cleanUrl = new URL(url.toString())
+	cleanUrl.username = ''
+	cleanUrl.password = ''
+	const clientConfig: Parameters<typeof createOpencodeClient>[0] = {
+		baseUrl: cleanUrl.toString(),
+		directory,
+	}
+	if (password) {
+		clientConfig.headers = {
+			Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`,
+		}
+	}
+	return createOpencodeClient(clientConfig)
 }
 
 export async function run(argv: RestartArgs): Promise<void> {
-  const db = openDatabase(argv.dbPath);
+	const db = openDatabase(argv.dbPath)
 
-  try {
-    const projectId = argv.resolvedProjectId;
+	try {
+		const projectId = argv.resolvedProjectId
 
-    const now = Date.now();
-    let query: string;
-    let params: (string | number)[];
+		const now = Date.now()
+		let query: string
+		let params: (string | number)[]
 
-    if (projectId) {
-      query =
-        "SELECT project_id, key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?";
-      params = [projectId, "loop:%", now];
-    } else {
-      query = "SELECT project_id, key, data FROM project_kv WHERE key LIKE ? AND expires_at > ?";
-      params = ["loop:%", now];
-    }
+		if (projectId) {
+			query =
+				'SELECT project_id, key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?'
+			params = [projectId, 'loop:%', now]
+		} else {
+			query = 'SELECT project_id, key, data FROM project_kv WHERE key LIKE ? AND expires_at > ?'
+			params = ['loop:%', now]
+		}
 
-    let rows: Array<{ project_id: string; key: string; data: string }>;
-    try {
-      rows = db.prepare(query).all(...params) as Array<{
-        project_id: string;
-        key: string;
-        data: string;
-      }>;
-    } catch {
-      rows = [];
-    }
+		let rows: Array<{ project_id: string; key: string; data: string }>
+		try {
+			rows = db.prepare(query).all(...params) as Array<{
+				project_id: string
+				key: string
+				data: string
+			}>
+		} catch {
+			rows = []
+		}
 
-    if (rows.length === 0) {
-      console.log("");
-      console.log("No loops.");
-      console.log("");
-      return;
-    }
+		if (rows.length === 0) {
+			console.log('')
+			console.log('No loops.')
+			console.log('')
+			return
+		}
 
-    const loops: Array<{
-      state: LoopState;
-      row: { project_id: string; key: string; data: string };
-    }> = [];
+		const loops: Array<{
+			state: LoopState
+			row: { project_id: string; key: string; data: string }
+		}> = []
 
-    for (const row of rows) {
-      try {
-        const state = JSON.parse(row.data) as LoopState;
-        loops.push({ state, row });
-      } catch (err) {
-        console.error(`Failed to parse loop state for key ${row.key}:`, err);
-      }
-    }
+		for (const row of rows) {
+			try {
+				const state = JSON.parse(row.data) as LoopState
+				loops.push({ state, row })
+			} catch (err) {
+				console.error(`Failed to parse loop state for key ${row.key}:`, err)
+			}
+		}
 
-    if (loops.length === 0) {
-      console.log("");
-      console.log("No loops.");
-      console.log("");
-      return;
-    }
+		if (loops.length === 0) {
+			console.log('')
+			console.log('No loops.')
+			console.log('')
+			return
+		}
 
-    let loopToRestart:
-      | { state: LoopState; row: { project_id: string; key: string; data: string } }
-      | undefined;
+		let loopToRestart: { state: LoopState; row: { project_id: string; key: string; data: string } } | undefined
 
-    if (argv.name) {
-      const { match, candidates } = findPartialMatch(argv.name, loops, (l) => [
-        l.state.loopName,
-        l.state.worktreeBranch,
-      ]);
+		if (argv.name) {
+			const { match, candidates } = findPartialMatch(argv.name, loops, l => [
+				l.state.loopName,
+				l.state.worktreeBranch,
+			])
 
-      if (!match && candidates.length > 0) {
-        console.error(`Multiple loops match '${argv.name}':`);
-        for (const c of candidates) {
-          console.error(`  - ${c.state.loopName}`);
-        }
-        console.error("");
-        process.exit(1);
-      }
+			if (!match && candidates.length > 0) {
+				console.error(`Multiple loops match '${argv.name}':`)
+				for (const c of candidates) {
+					console.error(`  - ${c.state.loopName}`)
+				}
+				console.error('')
+				process.exit(1)
+			}
 
-      if (!match && candidates.length === 0) {
-        console.error(`Loop not found: ${argv.name}`);
-        console.error("");
-        console.error("Available loops:");
-        for (const l of loops) {
-          console.error(`  - ${l.state.loopName}`);
-        }
-        console.error("");
-        process.exit(1);
-      }
+			if (!match && candidates.length === 0) {
+				console.error(`Loop not found: ${argv.name}`)
+				console.error('')
+				console.error('Available loops:')
+				for (const l of loops) {
+					console.error(`  - ${l.state.loopName}`)
+				}
+				console.error('')
+				process.exit(1)
+			}
 
-      loopToRestart = match!;
-    } else {
-      const restartableLoops = loops.filter(
-        (l) =>
-          l.state.active ||
-          (l.state.terminationReason && l.state.terminationReason !== "completed"),
-      );
-      if (restartableLoops.length === 0) {
-        console.log("");
-        console.log("No restartable loops found.");
-        console.log("");
-        return;
-      }
-      if (restartableLoops.length === 1) {
-        loopToRestart = restartableLoops[0];
-      } else {
-        console.log("");
-        console.log("Multiple restartable loops. Please specify which one to restart:");
-        console.log("");
-        for (const l of restartableLoops) {
-          console.log(`  - ${l.state.loopName}`);
-        }
-        console.log("");
-        console.log("Run 'oc-forgecode loop restart <name>' to restart a specific loop.");
-        console.log("");
-        process.exit(1);
-      }
-    }
+			loopToRestart = match!
+		} else {
+			const restartableLoops = loops.filter(
+				l => l.state.active || (l.state.terminationReason && l.state.terminationReason !== 'completed'),
+			)
+			if (restartableLoops.length === 0) {
+				console.log('')
+				console.log('No restartable loops found.')
+				console.log('')
+				return
+			}
+			if (restartableLoops.length === 1) {
+				loopToRestart = restartableLoops[0]
+			} else {
+				console.log('')
+				console.log('Multiple restartable loops. Please specify which one to restart:')
+				console.log('')
+				for (const l of restartableLoops) {
+					console.log(`  - ${l.state.loopName}`)
+				}
+				console.log('')
+				console.log("Run 'oc-forgecode loop restart <name>' to restart a specific loop.")
+				console.log('')
+				process.exit(1)
+			}
+		}
 
-    if (!loopToRestart) {
-      console.error("Internal error: loop not found");
-      process.exit(1);
-    }
+		if (!loopToRestart) {
+			console.error('Internal error: loop not found')
+			process.exit(1)
+		}
 
-    const { state, row } = loopToRestart;
+		const { state, row } = loopToRestart
 
-    if (state.terminationReason === "completed") {
-      console.log("");
-      console.log(`Loop "${state.loopName}" completed successfully and cannot be restarted.`);
-      console.log("");
-      process.exit(1);
-    }
+		if (state.terminationReason === 'completed') {
+			console.log('')
+			console.log(`Loop "${state.loopName}" completed successfully and cannot be restarted.`)
+			console.log('')
+			process.exit(1)
+		}
 
-    if (!state.worktreeDir) {
-      console.log("");
-      console.log(`Cannot restart "${state.loopName}": worktree directory is missing.`);
-      console.log("");
-      process.exit(1);
-    }
+		if (!state.worktreeDir) {
+			console.log('')
+			console.log(`Cannot restart "${state.loopName}": worktree directory is missing.`)
+			console.log('')
+			process.exit(1)
+		}
 
-    if (state.worktree && state.worktreeDir) {
-      const { existsSync } = await import("fs");
-      if (!existsSync(state.worktreeDir)) {
-        console.log("");
-        console.log(
-          `Cannot restart "${state.loopName}": worktree directory no longer exists at ${state.worktreeDir}.`,
-        );
-        console.log("");
-        process.exit(1);
-      }
-    }
+		if (state.worktree && state.worktreeDir) {
+			const { existsSync } = await import('fs')
+			if (!existsSync(state.worktreeDir)) {
+				console.log('')
+				console.log(
+					`Cannot restart "${state.loopName}": worktree directory no longer exists at ${state.worktreeDir}.`,
+				)
+				console.log('')
+				process.exit(1)
+			}
+		}
 
-    if (state.active && !argv.force) {
-      console.log("");
-      console.log(`Loop to Force Restart:`);
-      console.log(`  Loop:     ${state.loopName}`);
-      console.log(`  Session:   ${state.sessionId}`);
-      console.log(`  Iteration: ${state.iteration}/${state.maxIterations}`);
-      console.log(`  Phase:     ${state.phase}`);
-      console.log("");
+		if (state.active && !argv.force) {
+			console.log('')
+			console.log(`Loop to Force Restart:`)
+			console.log(`  Loop:     ${state.loopName}`)
+			console.log(`  Session:   ${state.sessionId}`)
+			console.log(`  Iteration: ${state.iteration}/${state.maxIterations}`)
+			console.log(`  Phase:     ${state.phase}`)
+			console.log('')
 
-      const shouldProceed = await confirm(`Force restart active loop '${state.loopName}'`);
+			const shouldProceed = await confirm(`Force restart active loop '${state.loopName}'`)
 
-      if (!shouldProceed) {
-        console.log("Cancelled.");
-        return;
-      }
-    }
+			if (!shouldProceed) {
+				console.log('Cancelled.')
+				return
+			}
+		}
 
-    const serverUrl = argv.server ?? "http://localhost:5551";
-    const directory = state.worktreeDir;
+		const serverUrl = argv.server ?? 'http://localhost:5551'
+		const directory = state.worktreeDir
 
-    const client = createStatusClient(serverUrl, directory);
+		const client = createStatusClient(serverUrl, directory)
 
-    if (state.active) {
-      try {
-        await client.session.abort({ sessionID: state.sessionId });
-        console.log(`Aborted old session: ${state.sessionId}`);
-      } catch {
-        console.log(`Warning: could not abort old session ${state.sessionId}`);
-      }
-    }
+		if (state.active) {
+			try {
+				await client.session.abort({ sessionID: state.sessionId })
+				console.log(`Aborted old session: ${state.sessionId}`)
+			} catch {
+				console.log(`Warning: could not abort old session ${state.sessionId}`)
+			}
+		}
 
-    // Worktree sessions no longer need log directory access since logging is dispatched via host session
-    const config = loadPluginConfig();
-    const agentExclusions = agents.forge.tools?.exclude;
-    const permissionRuleset = buildLoopPermissionRuleset(config, null, {
-      isWorktree: !!state.worktree,
-      agentExclusions,
-    });
+		// Worktree sessions no longer need log directory access since logging is dispatched via host session
+		const config = loadPluginConfig()
+		const agentExclusions = agents.forge.tools?.exclude
+		const permissionRuleset = buildLoopPermissionRuleset(config, null, {
+			isWorktree: !!state.worktree,
+			agentExclusions,
+		})
 
-    const createResult = await client.session.create({
-      title: state.loopName,
-      directory,
-      permission: permissionRuleset,
-    });
+		const createResult = await client.session.create({
+			title: state.loopName,
+			directory,
+			permission: permissionRuleset,
+		})
 
-    if (createResult.error || !createResult.data) {
-      console.error(`Failed to create new session: ${createResult.error}`);
-      process.exit(1);
-    }
+		if (createResult.error || !createResult.data) {
+			console.error(`Failed to create new session: ${createResult.error}`)
+			process.exit(1)
+		}
 
-    const newSessionId = createResult.data.id;
+		const newSessionId = createResult.data.id
 
-    const sessionKey = `loop-session:${newSessionId}`;
-    db.prepare(
-      "INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(
-      row.project_id,
-      sessionKey,
-      JSON.stringify(state.loopName),
-      now + 30 * 24 * 60 * 60 * 1000,
-      now,
-    );
+		const sessionKey = `loop-session:${newSessionId}`
+		db.prepare(
+			'INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+		).run(row.project_id, sessionKey, JSON.stringify(state.loopName), now + 30 * 24 * 60 * 60 * 1000, now)
 
-    const newState: LoopState = {
-      ...state,
-      active: true,
-      sessionId: newSessionId,
-      phase: "coding",
-      errorCount: 0,
-      auditCount: 0,
-      startedAt: new Date().toISOString(),
-      completedAt: undefined,
-      terminationReason: undefined,
-      projectDir: state.projectDir || state.worktreeDir,
-    };
-    db.prepare(
-      "UPDATE project_kv SET data = ?, updated_at = ? WHERE project_id = ? AND key = ?",
-    ).run(JSON.stringify(newState), now, row.project_id, row.key);
+		const newState: LoopState = {
+			...state,
+			active: true,
+			sessionId: newSessionId,
+			phase: 'coding',
+			errorCount: 0,
+			auditCount: 0,
+			startedAt: new Date().toISOString(),
+			completedAt: undefined,
+			terminationReason: undefined,
+			projectDir: state.projectDir || state.worktreeDir,
+		}
+		db.prepare('UPDATE project_kv SET data = ?, updated_at = ? WHERE project_id = ? AND key = ?').run(
+			JSON.stringify(newState),
+			now,
+			row.project_id,
+			row.key,
+		)
 
-    let promptText = state.prompt ?? "";
-    if (state.completionSignal) {
-      promptText += buildCompletionSignalInstructions(state.completionSignal);
-    }
+		let promptText = state.prompt ?? ''
+		if (state.completionSignal) {
+			promptText += buildCompletionSignalInstructions(state.completionSignal)
+		}
 
-    try {
-      await client.session.promptAsync({
-        sessionID: newSessionId,
-        directory,
-        parts: [{ type: "text", text: promptText }],
-        agent: "forge",
-      });
-    } catch (err) {
-      console.error(`Failed to send prompt: ${err}`);
-      process.exit(1);
-    }
+		try {
+			await client.session.promptAsync({
+				sessionID: newSessionId,
+				directory,
+				parts: [{ type: 'text', text: promptText }],
+				agent: 'forge',
+			})
+		} catch (err) {
+			console.error(`Failed to send prompt: ${err}`)
+			process.exit(1)
+		}
 
-    console.log("");
-    console.log(`Restarted loop "${state.loopName}"`);
-    console.log("");
-    console.log(`New session: ${newSessionId}`);
-    console.log(`Continuing from iteration: ${state.iteration}`);
-    console.log(`Previous termination: ${state.terminationReason ?? "unknown"}`);
-    console.log(`Directory: ${state.worktreeDir}`);
-    console.log(`Audit: ${state.audit ? "enabled" : "disabled"}`);
-    console.log("");
-  } finally {
-    db.close();
-  }
+		console.log('')
+		console.log(`Restarted loop "${state.loopName}"`)
+		console.log('')
+		console.log(`New session: ${newSessionId}`)
+		console.log(`Continuing from iteration: ${state.iteration}`)
+		console.log(`Previous termination: ${state.terminationReason ?? 'unknown'}`)
+		console.log(`Directory: ${state.worktreeDir}`)
+		console.log(`Audit: ${state.audit ? 'enabled' : 'disabled'}`)
+		console.log('')
+	} finally {
+		db.close()
+	}
 }
 
 export function help(): void {
-  console.log(
-    `
+	console.log(
+		`
 Restart a loop
 
 Usage:
@@ -311,38 +304,38 @@ Options:
   --db-path <path>      Path to forge database
   --help, -h            Show this help message
   `.trim(),
-  );
+	)
 }
 
 export async function cli(
-  args: string[],
-  globalOpts: { dbPath?: string; resolvedProjectId?: string; dir?: string },
+	args: string[],
+	globalOpts: { dbPath?: string; resolvedProjectId?: string; dir?: string },
 ): Promise<void> {
-  const argv: RestartArgs = {
-    dbPath: globalOpts.dbPath,
-    resolvedProjectId: globalOpts.resolvedProjectId,
-    server: "http://localhost:5551",
-  };
+	const argv: RestartArgs = {
+		dbPath: globalOpts.dbPath,
+		resolvedProjectId: globalOpts.resolvedProjectId,
+		server: 'http://localhost:5551',
+	}
 
-  let i = 0;
-  while (i < args.length) {
-    const arg = args[i];
-    if (arg === "--force") {
-      argv.force = true;
-    } else if (arg === "--server") {
-      argv.server = args[++i];
-    } else if (arg === "--help" || arg === "-h") {
-      help();
-      process.exit(0);
-    } else if (!arg.startsWith("-")) {
-      argv.name = arg;
-    } else {
-      console.error(`Unknown option: ${arg}`);
-      help();
-      process.exit(1);
-    }
-    i++;
-  }
+	let i = 0
+	while (i < args.length) {
+		const arg = args[i]
+		if (arg === '--force') {
+			argv.force = true
+		} else if (arg === '--server') {
+			argv.server = args[++i]
+		} else if (arg === '--help' || arg === '-h') {
+			help()
+			process.exit(0)
+		} else if (!arg.startsWith('-')) {
+			argv.name = arg
+		} else {
+			console.error(`Unknown option: ${arg}`)
+			help()
+			process.exit(1)
+		}
+		i++
+	}
 
-  await run(argv);
+	await run(argv)
 }

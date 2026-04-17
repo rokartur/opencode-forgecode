@@ -2,6 +2,4 @@ export { initializeDatabase, closeDatabase, resolveDataDir, resolveLogPath } fro
 export { createKvQuery } from './kv-queries'
 export type { KvRow } from './kv-queries'
 
-export type {
-  CompactionConfig,
-} from '../types'
+export type { CompactionConfig } from '../types'

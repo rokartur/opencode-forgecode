@@ -6,132 +6,128 @@ import { resolveLogPath } from './storage'
 import type { PluginConfig } from './types'
 
 function resolveBundledConfigPath(): string {
-  const pluginDir = dirname(fileURLToPath(import.meta.url))
-  return join(pluginDir, '..', 'forge-config.jsonc')
+	const pluginDir = dirname(fileURLToPath(import.meta.url))
+	return join(pluginDir, '..', 'forge-config.jsonc')
 }
 
 function resolveConfigDir(): string {
-  const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.config')
-  const xdgConfigHome = process.env['XDG_CONFIG_HOME'] || defaultBase
-  return join(xdgConfigHome, 'opencode')
+	const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.config')
+	const xdgConfigHome = process.env['XDG_CONFIG_HOME'] || defaultBase
+	return join(xdgConfigHome, 'opencode')
 }
 
 export function resolveConfigPath(): string {
-  return join(resolveConfigDir(), 'forge-config.jsonc')
+	return join(resolveConfigDir(), 'forge-config.jsonc')
 }
 
 function resolveLegacyConfigPaths(): string[] {
-  return [
-    join(resolveConfigDir(), 'memory-config.jsonc'),
-    join(resolveConfigDir(), 'graph-config.jsonc'),
-  ]
+	return [join(resolveConfigDir(), 'memory-config.jsonc'), join(resolveConfigDir(), 'graph-config.jsonc')]
 }
 
 function ensureGlobalConfig(): void {
-  const configDir = resolveConfigDir()
-  const newConfigPath = resolveConfigPath()
+	const configDir = resolveConfigDir()
+	const newConfigPath = resolveConfigPath()
 
-  if (existsSync(newConfigPath)) {
-    return
-  }
+	if (existsSync(newConfigPath)) {
+		return
+	}
 
-  if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true })
-  }
+	if (!existsSync(configDir)) {
+		mkdirSync(configDir, { recursive: true })
+	}
 
-  for (const legacyConfigPath of resolveLegacyConfigPaths()) {
-    if (existsSync(legacyConfigPath)) {
-      copyFileSync(legacyConfigPath, newConfigPath)
-      return
-    }
-  }
+	for (const legacyConfigPath of resolveLegacyConfigPaths()) {
+		if (existsSync(legacyConfigPath)) {
+			copyFileSync(legacyConfigPath, newConfigPath)
+			return
+		}
+	}
 
-  const bundledConfigPath = resolveBundledConfigPath()
-  if (existsSync(bundledConfigPath)) {
-    copyFileSync(bundledConfigPath, newConfigPath)
-  }
+	const bundledConfigPath = resolveBundledConfigPath()
+	if (existsSync(bundledConfigPath)) {
+		copyFileSync(bundledConfigPath, newConfigPath)
+	}
 }
 
 function getDefaultConfig(): PluginConfig {
-  return {
-    logging: {
-      enabled: false,
-      file: resolveLogPath(),
-    },
-  }
+	return {
+		logging: {
+			enabled: false,
+			file: resolveLogPath(),
+		},
+	}
 }
 
 function isValidPluginConfig(config: unknown): config is PluginConfig {
-  if (!config || typeof config !== 'object') return false
-  return true
+	if (!config || typeof config !== 'object') return false
+	return true
 }
 
 function stripComments(content: string): string {
-  let result = content
-  result = result.replace(/\/\*[\s\S]*?\*\//g, '')
-  result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
-  return result
+	let result = content
+	result = result.replace(/\/\*[\s\S]*?\*\//g, '')
+	result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
+	return result
 }
 
 function stripTrailingCommas(content: string): string {
-  let result = content
-  result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
-  result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
-  return result
+	let result = content
+	result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
+	result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
+	return result
 }
 
 function parseJsonc<T = unknown>(content: string): T {
-  const cleaned = stripComments(content)
-  const normalized = stripTrailingCommas(cleaned)
-  return JSON.parse(normalized) as T
+	const cleaned = stripComments(content)
+	const normalized = stripTrailingCommas(cleaned)
+	return JSON.parse(normalized) as T
 }
 
 export function loadPluginConfig(): PluginConfig {
-  ensureGlobalConfig()
-  
-  const configPath = resolveConfigPath()
+	ensureGlobalConfig()
 
-  if (!existsSync(configPath)) {
-    return getDefaultConfig()
-  }
+	const configPath = resolveConfigPath()
 
-  try {
-    const content = readFileSync(configPath, 'utf-8')
-    const parsed = parseJsonc(content)
+	if (!existsSync(configPath)) {
+		return getDefaultConfig()
+	}
 
-    if (!isValidPluginConfig(parsed)) {
-      console.warn(`[forge] Invalid config at ${configPath}, using defaults`)
-      return getDefaultConfig()
-    }
+	try {
+		const content = readFileSync(configPath, 'utf-8')
+		const parsed = parseJsonc(content)
 
-    return normalizeConfig(parsed)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.warn(`[forge] Failed to load config at ${configPath}: ${message}, using defaults`)
-    return getDefaultConfig()
-  }
+		if (!isValidPluginConfig(parsed)) {
+			console.warn(`[forge] Invalid config at ${configPath}, using defaults`)
+			return getDefaultConfig()
+		}
+
+		return normalizeConfig(parsed)
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err)
+		console.warn(`[forge] Failed to load config at ${configPath}: ${message}, using defaults`)
+		return getDefaultConfig()
+	}
 }
 
 function normalizeConfig(config: PluginConfig): PluginConfig {
-  const normalized: PluginConfig = {
-    dataDir: config.dataDir,
-    defaultKvTtlMs: config.defaultKvTtlMs,
-    logging: config.logging,
-    compaction: config.compaction,
-    messagesTransform: config.messagesTransform,
-    executionModel: config.executionModel,
-    auditorModel: config.auditorModel,
-    loop: config.loop,
-    tui: config.tui,
-    agents: config.agents,
-    sandbox: config.sandbox,
-    graph: config.graph,
-  }
-  
+	const normalized: PluginConfig = {
+		dataDir: config.dataDir,
+		defaultKvTtlMs: config.defaultKvTtlMs,
+		logging: config.logging,
+		compaction: config.compaction,
+		messagesTransform: config.messagesTransform,
+		executionModel: config.executionModel,
+		auditorModel: config.auditorModel,
+		loop: config.loop,
+		tui: config.tui,
+		agents: config.agents,
+		sandbox: config.sandbox,
+		graph: config.graph,
+	}
 
-  if (normalized.sandbox) {
-    normalized.sandbox.mode = normalized.sandbox.mode || 'off'
-  }
-  
-  return normalized
+	if (normalized.sandbox) {
+		normalized.sandbox.mode = normalized.sandbox.mode || 'off'
+	}
+
+	return normalized
 }

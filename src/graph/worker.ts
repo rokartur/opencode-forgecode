@@ -1,183 +1,183 @@
-import { Database } from "../runtime/sqlite";
-import { openGraphDatabase } from "./database";
-import { RpcServer } from "./rpc";
-import { RepoMap } from "./repo-map";
+import { Database } from '../runtime/sqlite'
+import { openGraphDatabase } from './database'
+import { RpcServer } from './rpc'
+import { RepoMap } from './repo-map'
 
-const dbPath = process.env["GRAPH_DB_PATH"] || "";
-const cwd = process.env["GRAPH_CWD"] || ".";
+const dbPath = process.env['GRAPH_DB_PATH'] || ''
+const cwd = process.env['GRAPH_CWD'] || '.'
 
-const rpcServer = new RpcServer();
+const rpcServer = new RpcServer()
 
 // Serialize handlers that mutate the graph DB. Read-only handlers bypass this
 // chain. Prevents races like overlapping scanBatch/onFileChanged flows both
 // trying to INSERT the same files.path (SQLITE_CONSTRAINT_UNIQUE).
-let writeChain: Promise<unknown> = Promise.resolve();
+let writeChain: Promise<unknown> = Promise.resolve()
 const runExclusive = <T>(fn: () => Promise<T>): Promise<T> => {
-  const next = writeChain.then(fn, fn);
-  writeChain = next.catch(() => {});
-  return next;
-};
+	const next = writeChain.then(fn, fn)
+	writeChain = next.catch(() => {})
+	return next
+}
 
 // Handle messages from parent FIRST - before expensive initialization
-self.onmessage = (event) => {
-  const data = event.data;
-  if (data && typeof data === "object" && "callId" in data) {
-    const msg = data as { callId: number; method: string; args: unknown[] };
-    rpcServer.handle(msg, (response) => {
-      postMessage(response);
-    });
-  }
-};
+self.onmessage = event => {
+	const data = event.data
+	if (data && typeof data === 'object' && 'callId' in data) {
+		const msg = data as { callId: number; method: string; args: unknown[] }
+		rpcServer.handle(msg, response => {
+			postMessage(response)
+		})
+	}
+}
 
 // Register RPC handlers before initialization
-rpcServer.register("scan", async () => {
-  await runExclusive(() => repoMap.scan());
-});
+rpcServer.register('scan', async () => {
+	await runExclusive(() => repoMap.scan())
+})
 
-rpcServer.register("prepareScan", async () => {
-  return runExclusive(() => repoMap.prepareScan());
-});
+rpcServer.register('prepareScan', async () => {
+	return runExclusive(() => repoMap.prepareScan())
+})
 
-rpcServer.register("scanBatch", async (args: unknown[]) => {
-  const offset = (args[0] as number) || 0;
-  const batchSize = (args[1] as number) || 500;
-  return runExclusive(() => repoMap.scanBatch(offset, batchSize));
-});
+rpcServer.register('scanBatch', async (args: unknown[]) => {
+	const offset = (args[0] as number) || 0
+	const batchSize = (args[1] as number) || 500
+	return runExclusive(() => repoMap.scanBatch(offset, batchSize))
+})
 
-rpcServer.register("finalizeScan", async () => {
-  await runExclusive(() => repoMap.finalizeScan());
-});
+rpcServer.register('finalizeScan', async () => {
+	await runExclusive(() => repoMap.finalizeScan())
+})
 
-rpcServer.register("getStats", async () => {
-  return repoMap.getStats();
-});
+rpcServer.register('getStats', async () => {
+	return repoMap.getStats()
+})
 
-rpcServer.register("getTopFiles", async (args: unknown[]) => {
-  const limit = (args[0] as number) || 20;
-  return repoMap.getTopFiles(limit);
-});
+rpcServer.register('getTopFiles', async (args: unknown[]) => {
+	const limit = (args[0] as number) || 20
+	return repoMap.getTopFiles(limit)
+})
 
-rpcServer.register("getFileDependents", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  return repoMap.getFileDependents(path);
-});
+rpcServer.register('getFileDependents', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	return repoMap.getFileDependents(path)
+})
 
-rpcServer.register("getFileDependencies", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  return repoMap.getFileDependencies(path);
-});
+rpcServer.register('getFileDependencies', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	return repoMap.getFileDependencies(path)
+})
 
-rpcServer.register("getFileCoChanges", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  return repoMap.getFileCoChanges(path);
-});
+rpcServer.register('getFileCoChanges', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	return repoMap.getFileCoChanges(path)
+})
 
-rpcServer.register("getFileBlastRadius", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  return repoMap.getFileBlastRadius(path);
-});
+rpcServer.register('getFileBlastRadius', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	return repoMap.getFileBlastRadius(path)
+})
 
-rpcServer.register("getFileSymbols", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  return repoMap.getFileSymbols(path);
-});
+rpcServer.register('getFileSymbols', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	return repoMap.getFileSymbols(path)
+})
 
-rpcServer.register("findSymbols", async (args: unknown[]) => {
-  const query = (args[0] as string) || "";
-  const limit = (args[1] as number) || 50;
-  return repoMap.findSymbols(query, limit);
-});
+rpcServer.register('findSymbols', async (args: unknown[]) => {
+	const query = (args[0] as string) || ''
+	const limit = (args[1] as number) || 50
+	return repoMap.findSymbols(query, limit)
+})
 
-rpcServer.register("searchSymbolsFts", async (args: unknown[]) => {
-  const query = (args[0] as string) || "";
-  const limit = (args[1] as number) || 50;
-  return repoMap.searchSymbolsFts(query, limit);
-});
+rpcServer.register('searchSymbolsFts', async (args: unknown[]) => {
+	const query = (args[0] as string) || ''
+	const limit = (args[1] as number) || 50
+	return repoMap.searchSymbolsFts(query, limit)
+})
 
-rpcServer.register("getSymbolSignature", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  const line = (args[1] as number) || 0;
-  return repoMap.getSymbolSignature(path, line);
-});
+rpcServer.register('getSymbolSignature', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	const line = (args[1] as number) || 0
+	return repoMap.getSymbolSignature(path, line)
+})
 
-rpcServer.register("getCallers", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  const line = (args[1] as number) || 0;
-  return repoMap.getCallers(path, line);
-});
+rpcServer.register('getCallers', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	const line = (args[1] as number) || 0
+	return repoMap.getCallers(path, line)
+})
 
-rpcServer.register("getCallees", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  const line = (args[1] as number) || 0;
-  return repoMap.getCallees(path, line);
-});
+rpcServer.register('getCallees', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	const line = (args[1] as number) || 0
+	return repoMap.getCallees(path, line)
+})
 
-rpcServer.register("getUnusedExports", async (args: unknown[]) => {
-  const limit = (args[0] as number) || 50;
-  return repoMap.getUnusedExports(limit);
-});
+rpcServer.register('getUnusedExports', async (args: unknown[]) => {
+	const limit = (args[0] as number) || 50
+	return repoMap.getUnusedExports(limit)
+})
 
-rpcServer.register("getDuplicateStructures", async (args: unknown[]) => {
-  const limit = (args[0] as number) || 20;
-  return repoMap.getDuplicateStructures(limit);
-});
+rpcServer.register('getDuplicateStructures', async (args: unknown[]) => {
+	const limit = (args[0] as number) || 20
+	return repoMap.getDuplicateStructures(limit)
+})
 
-rpcServer.register("getNearDuplicates", async (args: unknown[]) => {
-  const threshold = (args[0] as number) || 0.8;
-  const limit = (args[1] as number) || 50;
-  return repoMap.getNearDuplicates(threshold, limit);
-});
+rpcServer.register('getNearDuplicates', async (args: unknown[]) => {
+	const threshold = (args[0] as number) || 0.8
+	const limit = (args[1] as number) || 50
+	return repoMap.getNearDuplicates(threshold, limit)
+})
 
-rpcServer.register("getExternalPackages", async (args: unknown[]) => {
-  const limit = (args[0] as number) || 50;
-  return repoMap.getExternalPackages(limit);
-});
+rpcServer.register('getExternalPackages', async (args: unknown[]) => {
+	const limit = (args[0] as number) || 50
+	return repoMap.getExternalPackages(limit)
+})
 
-rpcServer.register("render", async (args: unknown[]) => {
-  const opts = args[0] as { maxFiles?: number; maxSymbols?: number } | undefined;
-  return repoMap.render(opts);
-});
+rpcServer.register('render', async (args: unknown[]) => {
+	const opts = args[0] as { maxFiles?: number; maxSymbols?: number } | undefined
+	return repoMap.render(opts)
+})
 
-rpcServer.register("getOrphanFiles", async (args: unknown[]) => {
-  const limit = (args[0] as number) || 50;
-  return repoMap.getOrphanFiles(limit);
-});
+rpcServer.register('getOrphanFiles', async (args: unknown[]) => {
+	const limit = (args[0] as number) || 50
+	return repoMap.getOrphanFiles(limit)
+})
 
-rpcServer.register("getCircularDependencies", async (args: unknown[]) => {
-  const limit = (args[0] as number) || 20;
-  return repoMap.getCircularDependencies(limit);
-});
+rpcServer.register('getCircularDependencies', async (args: unknown[]) => {
+	const limit = (args[0] as number) || 20
+	return repoMap.getCircularDependencies(limit)
+})
 
-rpcServer.register("getChangeImpact", async (args: unknown[]) => {
-  const paths = (args[0] as string[]) || [];
-  const maxDepth = (args[1] as number) || 5;
-  return repoMap.getChangeImpact(paths, maxDepth);
-});
+rpcServer.register('getChangeImpact', async (args: unknown[]) => {
+	const paths = (args[0] as string[]) || []
+	const maxDepth = (args[1] as number) || 5
+	return repoMap.getChangeImpact(paths, maxDepth)
+})
 
-rpcServer.register("getSymbolReferences", async (args: unknown[]) => {
-  const name = (args[0] as string) || "";
-  const limit = (args[1] as number) || 50;
-  return repoMap.getSymbolReferences(name, limit);
-});
+rpcServer.register('getSymbolReferences', async (args: unknown[]) => {
+	const name = (args[0] as string) || ''
+	const limit = (args[1] as number) || 50
+	return repoMap.getSymbolReferences(name, limit)
+})
 
-rpcServer.register("onFileChanged", async (args: unknown[]) => {
-  const path = (args[0] as string) || "";
-  return runExclusive(() => repoMap.onFileChanged(path));
-});
+rpcServer.register('onFileChanged', async (args: unknown[]) => {
+	const path = (args[0] as string) || ''
+	return runExclusive(() => repoMap.onFileChanged(path))
+})
 
-const db: Database = openGraphDatabase(dbPath);
+const db: Database = openGraphDatabase(dbPath)
 
 // Instantiate RepoMap
-const repoMap = new RepoMap({ cwd, db });
+const repoMap = new RepoMap({ cwd, db })
 
 // Initialize after handlers are registered
 try {
-  await repoMap.initialize();
+	await repoMap.initialize()
 } catch (error) {
-  const errorMsg = error instanceof Error ? error.message : String(error);
-  postMessage({
-    callId: -1,
-    error: `Worker initialization failed: ${errorMsg}`,
-  });
-  throw error;
+	const errorMsg = error instanceof Error ? error.message : String(error)
+	postMessage({
+		callId: -1,
+		error: `Worker initialization failed: ${errorMsg}`,
+	})
+	throw error
 }

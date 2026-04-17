@@ -5,35 +5,35 @@
  * from the shared project KV store.
  */
 
-import { Database } from "../runtime/sqlite";
-import { existsSync } from "fs";
-import { join } from "path";
-import { resolveDataDir } from "../storage";
-import type { GraphStatusPayload } from "./graph-status-store";
+import { Database } from '../runtime/sqlite'
+import { existsSync } from 'fs'
+import { join } from 'path'
+import { resolveDataDir } from '../storage'
+import type { GraphStatusPayload } from './graph-status-store'
 
 export type LoopInfo = {
-  name: string;
-  phase: string;
-  iteration: number;
-  maxIterations: number;
-  sessionId: string;
-  active: boolean;
-  startedAt?: string;
-  completedAt?: string;
-  terminationReason?: string;
-  worktreeBranch?: string;
-  worktree?: boolean;
-  worktreeDir?: string;
-  executionModel?: string;
-  auditorModel?: string;
-};
+	name: string
+	phase: string
+	iteration: number
+	maxIterations: number
+	sessionId: string
+	active: boolean
+	startedAt?: string
+	completedAt?: string
+	terminationReason?: string
+	worktreeBranch?: string
+	worktree?: boolean
+	worktreeDir?: string
+	executionModel?: string
+	auditorModel?: string
+}
 
 /**
  * Gets the database path used by the memory plugin.
  * Exported for testing purposes.
  */
 export function getDbPath(): string {
-  return join(resolveDataDir(), "graph.db");
+	return join(resolveDataDir(), 'graph.db')
 }
 
 /**
@@ -44,50 +44,50 @@ export function getDbPath(): string {
  * @returns Array of loop states
  */
 export function readLoopStates(projectId: string, dbPathOverride?: string): LoopInfo[] {
-  const dbPath = dbPathOverride || getDbPath();
+	const dbPath = dbPathOverride || getDbPath()
 
-  if (!existsSync(dbPath)) return [];
+	if (!existsSync(dbPath)) return []
 
-  let db: Database | null = null;
-  try {
-    db = new Database(dbPath, { readonly: true });
-    const now = Date.now();
-    const stmt = db.prepare(
-      "SELECT key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?",
-    );
-    const rows = stmt.all(projectId, "loop:%", now) as Array<{ key: string; data: string }>;
+	let db: Database | null = null
+	try {
+		db = new Database(dbPath, { readonly: true })
+		const now = Date.now()
+		const stmt = db.prepare(
+			'SELECT key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?',
+		)
+		const rows = stmt.all(projectId, 'loop:%', now) as Array<{ key: string; data: string }>
 
-    const loops: LoopInfo[] = [];
-    for (const row of rows) {
-      try {
-        const state = JSON.parse(row.data);
-        if (!state.loopName || !state.sessionId) continue;
-        loops.push({
-          name: state.loopName,
-          phase: state.phase ?? "coding",
-          iteration: state.iteration ?? 0,
-          maxIterations: state.maxIterations ?? 0,
-          sessionId: state.sessionId,
-          active: state.active ?? false,
-          startedAt: state.startedAt,
-          completedAt: state.completedAt,
-          terminationReason: state.terminationReason,
-          worktreeBranch: state.worktreeBranch,
-          worktree: state.worktree ?? false,
-          worktreeDir: state.worktreeDir,
-          executionModel: state.executionModel,
-          auditorModel: state.auditorModel,
-        });
-      } catch {}
-    }
-    return loops;
-  } catch {
-    return [];
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
+		const loops: LoopInfo[] = []
+		for (const row of rows) {
+			try {
+				const state = JSON.parse(row.data)
+				if (!state.loopName || !state.sessionId) continue
+				loops.push({
+					name: state.loopName,
+					phase: state.phase ?? 'coding',
+					iteration: state.iteration ?? 0,
+					maxIterations: state.maxIterations ?? 0,
+					sessionId: state.sessionId,
+					active: state.active ?? false,
+					startedAt: state.startedAt,
+					completedAt: state.completedAt,
+					terminationReason: state.terminationReason,
+					worktreeBranch: state.worktreeBranch,
+					worktree: state.worktree ?? false,
+					worktreeDir: state.worktreeDir,
+					executionModel: state.executionModel,
+					auditorModel: state.auditorModel,
+				})
+			} catch {}
+		}
+		return loops
+	} catch {
+		return []
+	} finally {
+		try {
+			db?.close()
+		} catch {}
+	}
 }
 
 /**
@@ -99,52 +99,48 @@ export function readLoopStates(projectId: string, dbPathOverride?: string): Loop
  * @param dbPathOverride - Optional database path override (for testing)
  * @returns The loop state or null if not found
  */
-export function readLoopByName(
-  projectId: string,
-  loopName: string,
-  dbPathOverride?: string,
-): LoopInfo | null {
-  const dbPath = dbPathOverride || getDbPath();
+export function readLoopByName(projectId: string, loopName: string, dbPathOverride?: string): LoopInfo | null {
+	const dbPath = dbPathOverride || getDbPath()
 
-  if (!existsSync(dbPath)) return null;
+	if (!existsSync(dbPath)) return null
 
-  let db: Database | null = null;
-  try {
-    db = new Database(dbPath, { readonly: true });
-    const now = Date.now();
-    const key = `loop:${loopName}`;
-    const row = db
-      .prepare("SELECT data FROM project_kv WHERE project_id = ? AND key = ? AND expires_at > ?")
-      .get(projectId, key, now) as { data: string } | null;
+	let db: Database | null = null
+	try {
+		db = new Database(dbPath, { readonly: true })
+		const now = Date.now()
+		const key = `loop:${loopName}`
+		const row = db
+			.prepare('SELECT data FROM project_kv WHERE project_id = ? AND key = ? AND expires_at > ?')
+			.get(projectId, key, now) as { data: string } | null
 
-    if (!row) return null;
+		if (!row) return null
 
-    const state = JSON.parse(row.data);
-    if (!state.loopName || !state.sessionId) return null;
+		const state = JSON.parse(row.data)
+		if (!state.loopName || !state.sessionId) return null
 
-    return {
-      name: state.loopName,
-      phase: state.phase ?? "coding",
-      iteration: state.iteration ?? 0,
-      maxIterations: state.maxIterations ?? 0,
-      sessionId: state.sessionId,
-      active: state.active ?? false,
-      startedAt: state.startedAt,
-      completedAt: state.completedAt,
-      terminationReason: state.terminationReason,
-      worktreeBranch: state.worktreeBranch,
-      worktree: state.worktree ?? false,
-      worktreeDir: state.worktreeDir,
-      executionModel: state.executionModel,
-      auditorModel: state.auditorModel,
-    };
-  } catch {
-    return null;
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
+		return {
+			name: state.loopName,
+			phase: state.phase ?? 'coding',
+			iteration: state.iteration ?? 0,
+			maxIterations: state.maxIterations ?? 0,
+			sessionId: state.sessionId,
+			active: state.active ?? false,
+			startedAt: state.startedAt,
+			completedAt: state.completedAt,
+			terminationReason: state.terminationReason,
+			worktreeBranch: state.worktreeBranch,
+			worktree: state.worktree ?? false,
+			worktreeDir: state.worktreeDir,
+			executionModel: state.executionModel,
+			auditorModel: state.auditorModel,
+		}
+	} catch {
+		return null
+	} finally {
+		try {
+			db?.close()
+		} catch {}
+	}
 }
 
 /**
@@ -162,14 +158,10 @@ export function readLoopByName(
  * @param graphStatus - Current graph status payload
  * @returns true if polling should continue, false otherwise
  */
-export function shouldPollSidebar(
-  loops: LoopInfo[],
-  graphStatus: GraphStatusPayload | null,
-): boolean {
-  const hasActiveWorktreeLoops = loops.some((l) => l.active && l.worktree);
-  const isGraphTransient =
-    graphStatus !== null &&
-    (graphStatus.state === "initializing" || graphStatus.state === "indexing");
+export function shouldPollSidebar(loops: LoopInfo[], graphStatus: GraphStatusPayload | null): boolean {
+	const hasActiveWorktreeLoops = loops.some(l => l.active && l.worktree)
+	const isGraphTransient =
+		graphStatus !== null && (graphStatus.state === 'initializing' || graphStatus.state === 'indexing')
 
-  return hasActiveWorktreeLoops || isGraphTransient;
+	return hasActiveWorktreeLoops || isGraphTransient
 }

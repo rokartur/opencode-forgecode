@@ -13,18 +13,18 @@
  * (projectId, cwd).
  */
 
-import { join } from "path";
-import { createHash } from "crypto";
+import { join } from 'path'
+import { createHash } from 'crypto'
 
 export function graphSocketPath(graphDir: string): string {
-  if (process.platform === "win32") {
-    const hash = createHash("sha256").update(graphDir).digest("hex").slice(0, 16);
-    return `\\\\.\\pipe\\opencode-graph-${hash}`;
-  }
-  // Unix socket paths are limited to ~104 bytes on macOS / ~108 on Linux
-  // (sun_path). `<graphDir>/graph.sock` easily fits for typical cache paths
-  // under ~/Library/Application Support or $XDG_DATA_HOME. If a caller
-  // provides an unusually long graphDir, they'll get an EADDRNOTAVAIL /
-  // ENAMETOOLONG from bind — acceptable failure, surfaced by the caller.
-  return join(graphDir, "graph.sock");
+	if (process.platform === 'win32') {
+		const hash = createHash('sha256').update(graphDir).digest('hex').slice(0, 16)
+		return `\\\\.\\pipe\\opencode-graph-${hash}`
+	}
+	// Unix socket paths are limited to ~104 bytes on macOS / ~108 on Linux
+	// (sun_path). `<graphDir>/graph.sock` easily fits for typical cache paths
+	// under ~/Library/Application Support or $XDG_DATA_HOME. If a caller
+	// provides an unusually long graphDir, they'll get an EADDRNOTAVAIL /
+	// ENAMETOOLONG from bind — acceptable failure, surfaced by the caller.
+	return join(graphDir, 'graph.sock')
 }

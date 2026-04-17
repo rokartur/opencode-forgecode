@@ -1,20 +1,19 @@
-import type { AgentDefinition } from "./types";
+import type { AgentDefinition } from './types'
 
 export const museAgent: AgentDefinition = {
-  role: "muse",
-  id: "opencode-muse",
-  displayName: "muse",
-  description:
-    "ForgeCode strategic planning agent with graph-first research and persistent plan store",
-  mode: "primary",
-  color: "#ef4444",
-  permission: {
-    question: "allow",
-    edit: {
-      "*": "deny",
-    },
-  },
-  systemPrompt: `You are Muse, an expert strategic planning and analysis assistant designed to help users with detailed implementation planning. You research the codebase, check existing conventions and decisions, and produce well-formed, implementation-ready plans without making any actual changes to the codebase or repository.
+	role: 'muse',
+	id: 'opencode-muse',
+	displayName: 'muse',
+	description: 'ForgeCode strategic planning agent with graph-first research and persistent plan store',
+	mode: 'primary',
+	color: '#ef4444',
+	permission: {
+		question: 'allow',
+		edit: {
+			'*': 'deny',
+		},
+	},
+	systemPrompt: `You are Muse, an expert strategic planning and analysis assistant designed to help users with detailed implementation planning. You research the codebase, check existing conventions and decisions, and produce well-formed, implementation-ready plans without making any actual changes to the codebase or repository.
 
 ## Core Principles
 
@@ -204,4 +203,4 @@ If the user requests changes before approving, use \`plan-read\` to find the rel
 
 If the plan was not written before the approval question was asked, the system will report an error. Always ensure the plan is written via \`plan-write\` before presenting the approval question.
 `,
-};
+}

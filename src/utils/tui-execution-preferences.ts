@@ -5,26 +5,26 @@
  * from project KV, used only for dialog defaults - not for runtime behavior.
  */
 
-import { Database } from "../runtime/sqlite";
-import { existsSync } from "fs";
-import { join } from "path";
-import { resolveDataDir } from "../storage";
-import type { PluginConfig } from "../types";
+import { Database } from '../runtime/sqlite'
+import { existsSync } from 'fs'
+import { join } from 'path'
+import { resolveDataDir } from '../storage'
+import type { PluginConfig } from '../types'
 
 export interface ExecutionPreferences {
-  mode: "New session" | "Execute here" | "Loop (worktree)" | "Loop";
-  executionModel?: string;
-  auditorModel?: string;
+	mode: 'New session' | 'Execute here' | 'Loop (worktree)' | 'Loop'
+	executionModel?: string
+	auditorModel?: string
 }
 
-const PREFERENCES_KEY = "tui:plan-execution-preferences";
-const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const PREFERENCES_KEY = 'tui:plan-execution-preferences'
+const TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
 /**
  * Gets the database path used by the memory plugin.
  */
 function getDbPath(): string {
-  return join(resolveDataDir(), "graph.db");
+	return join(resolveDataDir(), 'graph.db')
 }
 
 /**
@@ -34,37 +34,34 @@ function getDbPath(): string {
  * @param dbPathOverride - Optional database path override (for testing)
  * @returns The stored preferences or null if not found
  */
-export function readExecutionPreferences(
-  projectId: string,
-  dbPathOverride?: string,
-): ExecutionPreferences | null {
-  const dbPath = dbPathOverride || getDbPath();
+export function readExecutionPreferences(projectId: string, dbPathOverride?: string): ExecutionPreferences | null {
+	const dbPath = dbPathOverride || getDbPath()
 
-  if (!existsSync(dbPath)) return null;
+	if (!existsSync(dbPath)) return null
 
-  let db: Database | null = null;
-  try {
-    db = new Database(dbPath, { readonly: true });
-    const now = Date.now();
-    const row = db
-      .prepare("SELECT data FROM project_kv WHERE project_id = ? AND key = ? AND expires_at > ?")
-      .get(projectId, PREFERENCES_KEY, now) as { data: string } | null;
+	let db: Database | null = null
+	try {
+		db = new Database(dbPath, { readonly: true })
+		const now = Date.now()
+		const row = db
+			.prepare('SELECT data FROM project_kv WHERE project_id = ? AND key = ? AND expires_at > ?')
+			.get(projectId, PREFERENCES_KEY, now) as { data: string } | null
 
-    if (!row) return null;
+		if (!row) return null
 
-    const parsed = JSON.parse(row.data);
-    return {
-      mode: parsed.mode ?? "Loop (worktree)",
-      executionModel: parsed.executionModel,
-      auditorModel: parsed.auditorModel,
-    };
-  } catch {
-    return null;
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
+		const parsed = JSON.parse(row.data)
+		return {
+			mode: parsed.mode ?? 'Loop (worktree)',
+			executionModel: parsed.executionModel,
+			auditorModel: parsed.auditorModel,
+		}
+	} catch {
+		return null
+	} finally {
+		try {
+			db?.close()
+		} catch {}
+	}
 }
 
 /**
@@ -76,31 +73,31 @@ export function readExecutionPreferences(
  * @returns true if successful, false otherwise
  */
 export function writeExecutionPreferences(
-  projectId: string,
-  prefs: ExecutionPreferences,
-  dbPathOverride?: string,
+	projectId: string,
+	prefs: ExecutionPreferences,
+	dbPathOverride?: string,
 ): boolean {
-  const dbPath = dbPathOverride || getDbPath();
+	const dbPath = dbPathOverride || getDbPath()
 
-  if (!existsSync(dbPath)) return false;
+	if (!existsSync(dbPath)) return false
 
-  let db: Database | null = null;
-  try {
-    db = new Database(dbPath);
-    db.run("PRAGMA busy_timeout=5000");
-    const now = Date.now();
+	let db: Database | null = null
+	try {
+		db = new Database(dbPath)
+		db.run('PRAGMA busy_timeout=5000')
+		const now = Date.now()
 
-    db.prepare(
-      "INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-    ).run(projectId, PREFERENCES_KEY, JSON.stringify(prefs), now + TTL_MS, now, now);
-    return true;
-  } catch {
-    return false;
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
+		db.prepare(
+			'INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+		).run(projectId, PREFERENCES_KEY, JSON.stringify(prefs), now + TTL_MS, now, now)
+		return true
+	} catch {
+		return false
+	} finally {
+		try {
+			db?.close()
+		} catch {}
+	}
 }
 
 /**
@@ -123,21 +120,20 @@ export function writeExecutionPreferences(
  * @returns Resolved defaults for dialog pre-fill
  */
 export function resolveExecutionDialogDefaults(
-  config: PluginConfig,
-  storedPrefs: ExecutionPreferences | null,
+	config: PluginConfig,
+	storedPrefs: ExecutionPreferences | null,
 ): { mode: string; executionModel: string; auditorModel: string } {
-  const mode = storedPrefs?.mode ?? "Loop (worktree)";
+	const mode = storedPrefs?.mode ?? 'Loop (worktree)'
 
-  const executionModel =
-    storedPrefs?.executionModel ?? config.loop?.model ?? config.executionModel ?? "";
+	const executionModel = storedPrefs?.executionModel ?? config.loop?.model ?? config.executionModel ?? ''
 
-  const auditorModel =
-    storedPrefs?.auditorModel ??
-    config.auditorModel ??
-    storedPrefs?.executionModel ??
-    config.loop?.model ??
-    config.executionModel ??
-    "";
+	const auditorModel =
+		storedPrefs?.auditorModel ??
+		config.auditorModel ??
+		storedPrefs?.executionModel ??
+		config.loop?.model ??
+		config.executionModel ??
+		''
 
-  return { mode, executionModel, auditorModel };
+	return { mode, executionModel, auditorModel }
 }

@@ -10,42 +10,42 @@
  * implementation so the rest of the harness module is unchanged.
  */
 
-import type { ForgeEnv, ForgeMessage, ForgePendingTodo, ForgeSkill } from "./types";
+import type { ForgeEnv, ForgeMessage, ForgePendingTodo, ForgeSkill } from './types'
 
 export type TemplateName =
-  | "system-info"
-  | "tool-use-example"
-  | "tool-error-reflection"
-  | "skill-instructions"
-  | "summary-frame"
-  | "doom-loop-reminder"
-  | "pending-todos-reminder"
-  | "tool-retry-message"
-  | "title-generation"
-  | "commit-message";
+	| 'system-info'
+	| 'tool-use-example'
+	| 'tool-error-reflection'
+	| 'skill-instructions'
+	| 'summary-frame'
+	| 'doom-loop-reminder'
+	| 'pending-todos-reminder'
+	| 'tool-retry-message'
+	| 'title-generation'
+	| 'commit-message'
 
 export interface SystemInfoContext {
-  env: ForgeEnv;
+	env: ForgeEnv
 }
 
 export interface SkillInstructionsContext {
-  skills: ForgeSkill[];
+	skills: ForgeSkill[]
 }
 
 export interface SummaryFrameContext {
-  messages: ForgeMessage[];
+	messages: ForgeMessage[]
 }
 
 export interface DoomLoopReminderContext {
-  consecutive_calls: number;
+	consecutive_calls: number
 }
 
 export interface PendingTodosReminderContext {
-  todos: ForgePendingTodo[];
+	todos: ForgePendingTodo[]
 }
 
 export interface ToolRetryMessageContext {
-  attempts_left: number;
+	attempts_left: number
 }
 
 // ---------------------------------------------------------------------------
@@ -78,14 +78,14 @@ Important:
 
 Before using a tool, ensure all required arguments are available. 
 If any required arguments are missing, do not attempt to use the tool.
-`;
+`
 
 const TOOL_ERROR_REFLECTION = `You must now deeply reflect on the error above:
 1. Pinpoint exactly what was wrong with the tool call — was it the wrong tool, incorrect or missing parameters, or malformed structure?
 2. Explain why that mistake happened. Did you misunderstand the tool's schema? Miss a required field? Misread the context?
 3. Make the correct tool call as it should have been made.
 
-Do NOT skip this reflection.`;
+Do NOT skip this reflection.`
 
 const TITLE_GENERATION = `You are Title Generator, an expert assistant that analyzes user tasks and generates precise, impactful titles for user prompts.
 
@@ -95,7 +95,7 @@ const TITLE_GENERATION = `You are Title Generator, an expert assistant that anal
 - **Format**: Title case (e.g., "Advanced File Processing System") without Markdown Formatting
 - **Style**: Technical, clear, and informative
 - **Focus**: Capture core functionality without marketing language.
-`;
+`
 
 const COMMIT_MESSAGE = `You are a commit message generator that creates concise, conventional commit messages from git diffs.
 
@@ -137,24 +137,24 @@ Bad commit messages (avoid these):
 - Add new feature  (not lowercase, missing type)
 
 REMINDER: Output raw text directly. Do NOT use \`\`\`json or \`\`\` or any markdown.
-`;
+`
 
 // ---------------------------------------------------------------------------
 // Dynamic templates
 // ---------------------------------------------------------------------------
 
 function renderSystemInfo(ctx: SystemInfoContext): string {
-  const { env } = ctx;
-  return (
-    `<operating_system>${env.os}</operating_system>\n` +
-    `<current_working_directory>${env.cwd}</current_working_directory>\n` +
-    `<default_shell>${env.shell}</default_shell>\n` +
-    `<home_directory>${env.home}</home_directory>\n`
-  );
+	const { env } = ctx
+	return (
+		`<operating_system>${env.os}</operating_system>\n` +
+		`<current_working_directory>${env.cwd}</current_working_directory>\n` +
+		`<default_shell>${env.shell}</default_shell>\n` +
+		`<home_directory>${env.home}</home_directory>\n`
+	)
 }
 
 function renderSkillInstructions(ctx: SkillInstructionsContext): string {
-  const preamble = `## Skill Instructions:
+	const preamble = `## Skill Instructions:
 
 **CRITICAL**: Before attempting any task, ALWAYS check if a skill exists for it in the available_skills list below. Skills are specialized workflows that must be invoked when their trigger conditions match the user's request.
 
@@ -190,140 +190,134 @@ Important:
 - After loading a skill, follow its specific instructions to help the user
 
 <available_skills>
-`;
-  const items = ctx.skills
-    .map(
-      (s) =>
-        `<skill>\n<name>${s.name}</name>\n<description>\n${s.description}\n</description>\n</skill>`,
-    )
-    .join("\n");
-  return `${preamble}${items}\n</available_skills>\n`;
+`
+	const items = ctx.skills
+		.map(s => `<skill>\n<name>${s.name}</name>\n<description>\n${s.description}\n</description>\n</skill>`)
+		.join('\n')
+	return `${preamble}${items}\n</available_skills>\n`
 }
 
 function renderDoomLoopReminder(ctx: DoomLoopReminderContext): string {
-  return (
-    `You appear to be stuck in a repetitive loop, having made ${ctx.consecutive_calls} similar calls.\n` +
-    `This indicates you are not making progress. Please:\n\n` +
-    `1. Reconsider your approach to solving this problem\n` +
-    `2. Try a different tool or different arguments\n` +
-    `3. If you're stuck, explain what you're trying to accomplish and ask for clarification\n`
-  );
+	return (
+		`You appear to be stuck in a repetitive loop, having made ${ctx.consecutive_calls} similar calls.\n` +
+		`This indicates you are not making progress. Please:\n\n` +
+		`1. Reconsider your approach to solving this problem\n` +
+		`2. Try a different tool or different arguments\n` +
+		`3. If you're stuck, explain what you're trying to accomplish and ask for clarification\n`
+	)
 }
 
 function renderPendingTodosReminder(ctx: PendingTodosReminderContext): string {
-  const lines = ctx.todos.map((t) => `- [${t.status}] ${t.content}`).join("\n");
-  return (
-    `You have pending todo items that must be completed before finishing the task:\n\n` +
-    `${lines}\n\n` +
-    `Please complete all pending items before finishing.\n`
-  );
+	const lines = ctx.todos.map(t => `- [${t.status}] ${t.content}`).join('\n')
+	return (
+		`You have pending todo items that must be completed before finishing the task:\n\n` +
+		`${lines}\n\n` +
+		`Please complete all pending items before finishing.\n`
+	)
 }
 
 function renderToolRetryMessage(ctx: ToolRetryMessageContext): string {
-  return (
-    `Tool call failed\n` +
-    `- **Attempts remaining:** ${ctx.attempts_left}\n` +
-    `- **Next steps:** Analyze the error, identify the root cause, and adjust your approach before retrying.\n`
-  );
+	return (
+		`Tool call failed\n` +
+		`- **Attempts remaining:** ${ctx.attempts_left}\n` +
+		`- **Next steps:** Analyze the error, identify the root cause, and adjust your approach before retrying.\n`
+	)
 }
 
 function renderSummaryFrame(ctx: SummaryFrameContext): string {
-  const header =
-    `Use the following summary frames as the authoritative reference for all coding suggestions and decisions. ` +
-    `Do not re-explain or revisit it unless I ask. Additional summary frames will be added as the conversation progresses.\n\n` +
-    `## Summary\n\n`;
-  const body = ctx.messages
-    .map((msg, i) => {
-      const head = `### ${i + 1}. ${msg.role}\n\n`;
-      const parts = msg.contents.map((c) => {
-        if (typeof c.text === "string" && c.text.length > 0) {
-          return "````\n" + c.text + "\n````\n";
-        }
-        if (c.tool_call) return renderToolCall(c.tool_call);
-        return "";
-      });
-      return head + parts.filter(Boolean).join("");
-    })
-    .join("\n");
-  return `${header}${body}\n---\n\nProceed with implementation based on this context.\n`;
+	const header =
+		`Use the following summary frames as the authoritative reference for all coding suggestions and decisions. ` +
+		`Do not re-explain or revisit it unless I ask. Additional summary frames will be added as the conversation progresses.\n\n` +
+		`## Summary\n\n`
+	const body = ctx.messages
+		.map((msg, i) => {
+			const head = `### ${i + 1}. ${msg.role}\n\n`
+			const parts = msg.contents.map(c => {
+				if (typeof c.text === 'string' && c.text.length > 0) {
+					return '````\n' + c.text + '\n````\n'
+				}
+				if (c.tool_call) return renderToolCall(c.tool_call)
+				return ''
+			})
+			return head + parts.filter(Boolean).join('')
+		})
+		.join('\n')
+	return `${header}${body}\n---\n\nProceed with implementation based on this context.\n`
 }
 
-function renderToolCall(call: ForgeMessage["contents"][number]["tool_call"]): string {
-  if (!call) return "";
-  const t = call.tool;
-  if (t.file_update) return `**Update:** \`${t.file_update.path}\`\n`;
-  if (t.file_read) return `**Read:** \`${t.file_read.path}\`\n`;
-  if (t.file_remove) return `**Delete:** \`${t.file_remove.path}\`\n`;
-  if (t.search) return `**Search:** \`${t.search.pattern}\`\n`;
-  if (t.skill) return `**Skill:** \`${t.skill.name}\`\n`;
-  if (t.sem_search) {
-    const queries = t.sem_search.queries.map((q) => `- \`${q.use_case}\``).join("\n");
-    return `**Semantic Search:**\n${queries}\n`;
-  }
-  if (t.shell) return `**Execute:**\n\`\`\`\n${t.shell.command}\n\`\`\`\n`;
-  if (t.mcp) return `**MCP:** \`${t.mcp.name}\`\n`;
-  if (t.todo_write) {
-    const lines = t.todo_write.changes
-      .map((c) => {
-        if (c.kind === "added") return `- [ADD] ${c.todo.content}`;
-        if (c.kind === "removed") return `- [CANCELLED] ~~${c.todo.content}~~`;
-        // updated
-        if (c.todo.status === "completed") return `- [DONE] ~~${c.todo.content}~~`;
-        if (c.todo.status === "in_progress") return `- [IN_PROGRESS] ${c.todo.content}`;
-        return `- [UPDATE] ${c.todo.content}`;
-      })
-      .join("\n");
-    return `**Task Plan:**\n${lines}\n`;
-  }
-  return "";
+function renderToolCall(call: ForgeMessage['contents'][number]['tool_call']): string {
+	if (!call) return ''
+	const t = call.tool
+	if (t.file_update) return `**Update:** \`${t.file_update.path}\`\n`
+	if (t.file_read) return `**Read:** \`${t.file_read.path}\`\n`
+	if (t.file_remove) return `**Delete:** \`${t.file_remove.path}\`\n`
+	if (t.search) return `**Search:** \`${t.search.pattern}\`\n`
+	if (t.skill) return `**Skill:** \`${t.skill.name}\`\n`
+	if (t.sem_search) {
+		const queries = t.sem_search.queries.map(q => `- \`${q.use_case}\``).join('\n')
+		return `**Semantic Search:**\n${queries}\n`
+	}
+	if (t.shell) return `**Execute:**\n\`\`\`\n${t.shell.command}\n\`\`\`\n`
+	if (t.mcp) return `**MCP:** \`${t.mcp.name}\`\n`
+	if (t.todo_write) {
+		const lines = t.todo_write.changes
+			.map(c => {
+				if (c.kind === 'added') return `- [ADD] ${c.todo.content}`
+				if (c.kind === 'removed') return `- [CANCELLED] ~~${c.todo.content}~~`
+				// updated
+				if (c.todo.status === 'completed') return `- [DONE] ~~${c.todo.content}~~`
+				if (c.todo.status === 'in_progress') return `- [IN_PROGRESS] ${c.todo.content}`
+				return `- [UPDATE] ${c.todo.content}`
+			})
+			.join('\n')
+		return `**Task Plan:**\n${lines}\n`
+	}
+	return ''
 }
 
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
-type ContextFor<N extends TemplateName> = N extends "system-info"
-  ? SystemInfoContext
-  : N extends "skill-instructions"
-    ? SkillInstructionsContext
-    : N extends "summary-frame"
-      ? SummaryFrameContext
-      : N extends "doom-loop-reminder"
-        ? DoomLoopReminderContext
-        : N extends "pending-todos-reminder"
-          ? PendingTodosReminderContext
-          : N extends "tool-retry-message"
-            ? ToolRetryMessageContext
-            : Record<string, never>;
+type ContextFor<N extends TemplateName> = N extends 'system-info'
+	? SystemInfoContext
+	: N extends 'skill-instructions'
+		? SkillInstructionsContext
+		: N extends 'summary-frame'
+			? SummaryFrameContext
+			: N extends 'doom-loop-reminder'
+				? DoomLoopReminderContext
+				: N extends 'pending-todos-reminder'
+					? PendingTodosReminderContext
+					: N extends 'tool-retry-message'
+						? ToolRetryMessageContext
+						: Record<string, never>
 
-export async function render<N extends TemplateName>(
-  name: N,
-  context: ContextFor<N>,
-): Promise<string> {
-  switch (name) {
-    case "tool-use-example":
-      return TOOL_USE_EXAMPLE;
-    case "tool-error-reflection":
-      return TOOL_ERROR_REFLECTION;
-    case "title-generation":
-      return TITLE_GENERATION;
-    case "commit-message":
-      return COMMIT_MESSAGE;
-    case "system-info":
-      return renderSystemInfo(context as SystemInfoContext);
-    case "skill-instructions":
-      return renderSkillInstructions(context as SkillInstructionsContext);
-    case "summary-frame":
-      return renderSummaryFrame(context as SummaryFrameContext);
-    case "doom-loop-reminder":
-      return renderDoomLoopReminder(context as DoomLoopReminderContext);
-    case "pending-todos-reminder":
-      return renderPendingTodosReminder(context as PendingTodosReminderContext);
-    case "tool-retry-message":
-      return renderToolRetryMessage(context as ToolRetryMessageContext);
-    default: {
-      const _exhaustive: never = name;
-      throw new Error(`unknown forge template: ${String(_exhaustive)}`);
-    }
-  }
+export async function render<N extends TemplateName>(name: N, context: ContextFor<N>): Promise<string> {
+	switch (name) {
+		case 'tool-use-example':
+			return TOOL_USE_EXAMPLE
+		case 'tool-error-reflection':
+			return TOOL_ERROR_REFLECTION
+		case 'title-generation':
+			return TITLE_GENERATION
+		case 'commit-message':
+			return COMMIT_MESSAGE
+		case 'system-info':
+			return renderSystemInfo(context as SystemInfoContext)
+		case 'skill-instructions':
+			return renderSkillInstructions(context as SkillInstructionsContext)
+		case 'summary-frame':
+			return renderSummaryFrame(context as SummaryFrameContext)
+		case 'doom-loop-reminder':
+			return renderDoomLoopReminder(context as DoomLoopReminderContext)
+		case 'pending-todos-reminder':
+			return renderPendingTodosReminder(context as PendingTodosReminderContext)
+		case 'tool-retry-message':
+			return renderToolRetryMessage(context as ToolRetryMessageContext)
+		default: {
+			const _exhaustive: never = name
+			throw new Error(`unknown forge template: ${String(_exhaustive)}`)
+		}
+	}
 }

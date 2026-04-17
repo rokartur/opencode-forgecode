@@ -1,96 +1,96 @@
 {
-  // Data directory for plugin storage (graph.db, KV store, logs)
-  // When empty, resolves to ~/.local/share/opencode/forge (or XDG_DATA_HOME equivalent)
-  "dataDir": "",
+	// Data directory for plugin storage (graph.db, KV store, logs)
+	// When empty, resolves to ~/.local/share/opencode/forge (or XDG_DATA_HOME equivalent)
+	"dataDir": "",
 
-  // Logging configuration
-  "logging": {
-    "enabled": false,
-    "debug": false,
-    "file": ""
-  },
+	// Logging configuration
+	"logging": {
+		"enabled": false,
+		"debug": false,
+		"file": "",
+	},
 
-  // Session compaction settings for forgecode's own prompt override/fallback.
-  // Keep OpenCode's native `compaction.auto=true` and `compaction.prune=true`
-  // in `opencode.json`; this block does not replace the root OpenCode setting.
-  "compaction": {
-    "customPrompt": true,
-    "maxContextTokens": 0
-  },
+	// Session compaction settings for forgecode's own prompt override/fallback.
+	// Keep OpenCode's native `compaction.auto=true` and `compaction.prune=true`
+	// in `opencode.json`; this block does not replace the root OpenCode setting.
+	"compaction": {
+		"customPrompt": true,
+		"maxContextTokens": 0,
+	},
 
-  // Messages transform hook for graph injection and read-only enforcement
-  "messagesTransform": {
-    "enabled": true,
-    "debug": false
-  },
+	// Messages transform hook for graph injection and read-only enforcement
+	"messagesTransform": {
+		"enabled": true,
+		"debug": false,
+	},
 
-  // Model override for plan execution sessions (format: "provider/model")
-  "executionModel": "",
+	// Model override for plan execution sessions (format: "provider/model")
+	"executionModel": "",
 
-  // Model override for the sage agent in review mode (format: "provider/model")
-  // Kept as `auditorModel` for backwards compatibility.
-  "auditorModel": "",
+	// Model override for the sage agent in review mode (format: "provider/model")
+	// Kept as `auditorModel` for backwards compatibility.
+	"auditorModel": "",
 
-  // Iterative development loop settings
-  "loop": {
-    "enabled": true,
-    "defaultMaxIterations": 15,
-    "cleanupWorktree": false,
-    "defaultAudit": true,
-    "model": "",
-    "minAudits": 1,
-    "stallTimeoutMs": 60000,
-    // Worktree loop completion logging (off by default)
-    "worktreeLogging": {
-      "enabled": false,
-      "directory": ""
-    }
-  },
+	// Iterative development loop settings
+	"loop": {
+		"enabled": true,
+		"defaultMaxIterations": 15,
+		"cleanupWorktree": false,
+		"defaultAudit": true,
+		"model": "",
+		"minAudits": 1,
+		"stallTimeoutMs": 60000,
+		// Worktree loop completion logging (off by default)
+		"worktreeLogging": {
+			"enabled": false,
+			"directory": "",
+		},
+	},
 
-  // Docker sandbox configuration for isolated loop execution
-  "sandbox": {
-    "mode": "off",
-    "image": "oc-forge-sandbox:latest"
-  },
+	// Docker sandbox configuration for isolated loop execution
+	"sandbox": {
+		"mode": "off",
+		"image": "oc-forge-sandbox:latest",
+	},
 
-  // Graph indexing configuration
-  "graph": {
-    "enabled": true,
-    "autoScan": true,
-    "watch": true,
-    "debounceMs": 100
-  },
+	// Graph indexing configuration
+	"graph": {
+		"enabled": true,
+		"autoScan": true,
+		"watch": true,
+		"debounceMs": 100,
+	},
 
-  // Forge harness (system prompts, summary-frame compaction, truncation,
-  // doom-loop detection, pending-todo reminders, undo snapshots).
-  // If you also use DCP, leave this enabled so forgecode still owns the final
-  // `experimental.session.compacting` summary-frame step.
-  "harness": {
-    "enabled": true,
-    "doomLoopThreshold": 3,
-    "pendingTodosReminder": true,
-    "snapshots": true,
-    "compaction": true,
-    "truncation": {
-      "enabled": true
-    }
-  },
+	// Forge harness (system prompts, summary-frame compaction, truncation,
+	// doom-loop detection, pending-todo reminders, undo snapshots).
+	// If you also use DCP, leave this enabled so forgecode still owns the final
+	// `experimental.session.compacting` summary-frame step.
+	"harness": {
+		"enabled": true,
+		"doomLoopThreshold": 3,
+		"pendingTodosReminder": true,
+		"snapshots": true,
+		"compaction": true,
+		"truncation": {
+			"enabled": true,
+		},
+	},
 
-  // TUI sidebar widget configuration
-  "tui": {
-    "sidebar": true,
-    "showLoops": true,
-    "showVersion": true
-  },
+	// TUI sidebar widget configuration
+	"tui": {
+		"sidebar": true,
+		"showLoops": true,
+		"showVersion": true,
+	},
 
-  // Default TTL for KV store entries in milliseconds (default: 604800000 / 7 days)
-  "defaultKvTtlMs": 604800000,
+	// Default TTL for KV store entries in milliseconds (default: 604800000 / 7 days)
+	"defaultKvTtlMs": 604800000,
 
-  // Per-agent overrides (temperature range: 0.0 - 2.0)
-  // Keys are agent display names: "forge", "muse", "sage"
-  "agents": {
-    "forge": { "temperature": 0.7 },
-    "muse": { "temperature": 0.0 },
-    "sage": { "temperature": 0.0 }
-  }
+	// Per-agent overrides (temperature range: 0.0 - 2.0)
+	// Keys are agent display names: "forge", "muse", "sage"
+	"agents": {
+		"forge": { "temperature": 0.7 },
+		"muse": { "temperature": 0.0 },
+		"sage": { "temperature": 0.0 },
+	},
 }

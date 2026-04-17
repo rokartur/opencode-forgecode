@@ -7,292 +7,292 @@ import { homedir } from 'os'
 const TEST_DIR = '/tmp/opencode-manager-memory-setup-test-' + Date.now()
 
 describe('loadPluginConfig', () => {
-  let testConfigDir: string
-  let testDataDir: string
+	let testConfigDir: string
+	let testDataDir: string
 
-  beforeEach(() => {
-    testConfigDir = TEST_DIR + '-config-' + Math.random().toString(36).slice(2)
-    testDataDir = TEST_DIR + '-data-' + Math.random().toString(36).slice(2)
-    mkdirSync(testConfigDir, { recursive: true })
-    mkdirSync(testDataDir, { recursive: true })
-    process.env['XDG_CONFIG_HOME'] = testConfigDir
-    process.env['XDG_DATA_HOME'] = testDataDir
-  })
+	beforeEach(() => {
+		testConfigDir = TEST_DIR + '-config-' + Math.random().toString(36).slice(2)
+		testDataDir = TEST_DIR + '-data-' + Math.random().toString(36).slice(2)
+		mkdirSync(testConfigDir, { recursive: true })
+		mkdirSync(testDataDir, { recursive: true })
+		process.env['XDG_CONFIG_HOME'] = testConfigDir
+		process.env['XDG_DATA_HOME'] = testDataDir
+	})
 
-  afterEach(() => {
-    delete process.env['XDG_CONFIG_HOME']
-    delete process.env['XDG_DATA_HOME']
-    if (existsSync(testConfigDir)) {
-      rmSync(testConfigDir, { recursive: true, force: true })
-    }
-    if (existsSync(testDataDir)) {
-      rmSync(testDataDir, { recursive: true, force: true })
-    }
-  })
+	afterEach(() => {
+		delete process.env['XDG_CONFIG_HOME']
+		delete process.env['XDG_DATA_HOME']
+		if (existsSync(testConfigDir)) {
+			rmSync(testConfigDir, { recursive: true, force: true })
+		}
+		if (existsSync(testDataDir)) {
+			rmSync(testDataDir, { recursive: true, force: true })
+		}
+	})
 
-  test('returns default config when no config file exists', () => {
-    const config = loadPluginConfig()
-    expect(config.logging).toBeDefined()
-    expect(config.logging?.enabled).toBe(false)
-  })
+	test('returns default config when no config file exists', () => {
+		const config = loadPluginConfig()
+		expect(config.logging).toBeDefined()
+		expect(config.logging?.enabled).toBe(false)
+	})
 
-  test('reads and parses valid config file', () => {
-    const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
-    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
+	test('reads and parses valid config file', () => {
+		const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
+		mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
 
-    const validConfig = {
-      logging: {
-        enabled: true,
-        debug: true,
-      },
-      loop: {
-        enabled: true,
-        defaultMaxIterations: 20,
-      },
-    }
+		const validConfig = {
+			logging: {
+				enabled: true,
+				debug: true,
+			},
+			loop: {
+				enabled: true,
+				defaultMaxIterations: 20,
+			},
+		}
 
-    writeFileSync(configPath, JSON.stringify(validConfig))
+		writeFileSync(configPath, JSON.stringify(validConfig))
 
-    const config = loadPluginConfig()
-    expect(config.logging?.enabled).toBe(true)
-    expect(config.logging?.debug).toBe(true)
-    expect(config.loop?.enabled).toBe(true)
-  })
+		const config = loadPluginConfig()
+		expect(config.logging?.enabled).toBe(true)
+		expect(config.logging?.debug).toBe(true)
+		expect(config.loop?.enabled).toBe(true)
+	})
 
-  test('returns defaults when file contains invalid JSON', () => {
-    const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
-    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
+	test('returns defaults when file contains invalid JSON', () => {
+		const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
+		mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
 
-    writeFileSync(configPath, 'invalid json content')
+		writeFileSync(configPath, 'invalid json content')
 
-    const config = loadPluginConfig()
-    expect(config.logging).toBeDefined()
-  })
+		const config = loadPluginConfig()
+		expect(config.logging).toBeDefined()
+	})
 
-  test('loads config with graph settings', () => {
-    const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
-    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
+	test('loads config with graph settings', () => {
+		const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
+		mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
 
-    const graphConfig = {
-      graph: {
-        enabled: true,
-        watch: true,
-      },
-    }
+		const graphConfig = {
+			graph: {
+				enabled: true,
+				watch: true,
+			},
+		}
 
-    writeFileSync(configPath, JSON.stringify(graphConfig))
+		writeFileSync(configPath, JSON.stringify(graphConfig))
 
-    const config = loadPluginConfig()
-    expect(config.graph?.enabled).toBe(true)
-  })
+		const config = loadPluginConfig()
+		expect(config.graph?.enabled).toBe(true)
+	})
 
-  test('loads config with sandbox settings', () => {
-    const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
-    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
+	test('loads config with sandbox settings', () => {
+		const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
+		mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
 
-    const sandboxConfig = {
-      sandbox: {
-        mode: 'docker',
-        image: 'custom-image:latest',
-      },
-    }
+		const sandboxConfig = {
+			sandbox: {
+				mode: 'docker',
+				image: 'custom-image:latest',
+			},
+		}
 
-    writeFileSync(configPath, JSON.stringify(sandboxConfig))
+		writeFileSync(configPath, JSON.stringify(sandboxConfig))
 
-    const config = loadPluginConfig()
-    expect(config.sandbox?.mode).toBe('docker')
-    expect(config.sandbox?.image).toBe('custom-image:latest')
-  })
+		const config = loadPluginConfig()
+		expect(config.sandbox?.mode).toBe('docker')
+		expect(config.sandbox?.image).toBe('custom-image:latest')
+	})
 })
 
 describe('resolveConfigPath', () => {
-  let testConfigDir: string
+	let testConfigDir: string
 
-  beforeEach(() => {
-    testConfigDir = TEST_DIR + '-configpath-' + Math.random().toString(36).slice(2)
-    mkdirSync(testConfigDir, { recursive: true })
-  })
+	beforeEach(() => {
+		testConfigDir = TEST_DIR + '-configpath-' + Math.random().toString(36).slice(2)
+		mkdirSync(testConfigDir, { recursive: true })
+	})
 
-  afterEach(() => {
-    delete process.env['XDG_CONFIG_HOME']
-    if (existsSync(testConfigDir)) {
-      rmSync(testConfigDir, { recursive: true, force: true })
-    }
-  })
+	afterEach(() => {
+		delete process.env['XDG_CONFIG_HOME']
+		if (existsSync(testConfigDir)) {
+			rmSync(testConfigDir, { recursive: true, force: true })
+		}
+	})
 
-  test('returns correct path based on XDG_CONFIG_HOME', () => {
-    process.env['XDG_CONFIG_HOME'] = testConfigDir
-    const configPath = resolveConfigPath()
-    expect(configPath).toBe(join(testConfigDir, 'opencode', 'forge-config.jsonc'))
-  })
+	test('returns correct path based on XDG_CONFIG_HOME', () => {
+		process.env['XDG_CONFIG_HOME'] = testConfigDir
+		const configPath = resolveConfigPath()
+		expect(configPath).toBe(join(testConfigDir, 'opencode', 'forge-config.jsonc'))
+	})
 
-  test('falls back to ~/.config when XDG_CONFIG_HOME is unset', () => {
-    delete process.env['XDG_CONFIG_HOME']
-    const configPath = resolveConfigPath()
-    const expectedDefault = join(homedir(), '.config', 'opencode', 'forge-config.jsonc')
-    expect(configPath).toBe(expectedDefault)
-  })
+	test('falls back to ~/.config when XDG_CONFIG_HOME is unset', () => {
+		delete process.env['XDG_CONFIG_HOME']
+		const configPath = resolveConfigPath()
+		const expectedDefault = join(homedir(), '.config', 'opencode', 'forge-config.jsonc')
+		expect(configPath).toBe(expectedDefault)
+	})
 })
 
 describe('bundled sample config', () => {
-  let testConfigDir: string
+	let testConfigDir: string
 
-  beforeEach(() => {
-    testConfigDir = TEST_DIR + '-configpath-' + Math.random().toString(36).slice(2)
-    mkdirSync(testConfigDir, { recursive: true })
-  })
+	beforeEach(() => {
+		testConfigDir = TEST_DIR + '-configpath-' + Math.random().toString(36).slice(2)
+		mkdirSync(testConfigDir, { recursive: true })
+	})
 
-  afterEach(() => {
-    delete process.env['XDG_CONFIG_HOME']
-    if (existsSync(testConfigDir)) {
-      rmSync(testConfigDir, { recursive: true, force: true })
-    }
-  })
+	afterEach(() => {
+		delete process.env['XDG_CONFIG_HOME']
+		if (existsSync(testConfigDir)) {
+			rmSync(testConfigDir, { recursive: true, force: true })
+		}
+	})
 
-  test('bundled forge-config.jsonc is valid JSONC and parses successfully', () => {
-    const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
-    expect(existsSync(bundledConfigPath)).toBe(true)
-    
-    const content = readFileSync(bundledConfigPath, 'utf-8')
-    expect(content).toBeDefined()
-    
-    const config = loadPluginConfig()
-    const parsed = loadPluginConfig()
-    expect(parsed).toBeDefined()
-  })
+	test('bundled forge-config.jsonc is valid JSONC and parses successfully', () => {
+		const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
+		expect(existsSync(bundledConfigPath)).toBe(true)
 
-  test('bundled config includes all supported top-level keys', () => {
-    const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
-    const content = readFileSync(bundledConfigPath, 'utf-8')
-    
-    const stripComments = (text: string): string => {
-      let result = text
-      result = result.replace(/\/\*[\s\S]*?\*\//g, '')
-      result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
-      return result
-    }
-    
-    const stripTrailingCommas = (text: string): string => {
-      let result = text
-      result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
-      result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
-      return result
-    }
-    
-    const cleaned = stripComments(content)
-    const normalized = stripTrailingCommas(cleaned)
-    const parsed = JSON.parse(normalized)
-    
-    expect(parsed.dataDir).toBeDefined()
-    expect(parsed.logging).toBeDefined()
-    expect(parsed.compaction).toBeDefined()
-    expect(parsed.messagesTransform).toBeDefined()
-    expect(parsed.executionModel).toBeDefined()
-    expect(parsed.auditorModel).toBeDefined()
-    expect(parsed.loop).toBeDefined()
-    expect(parsed.sandbox).toBeDefined()
-    expect(parsed.graph).toBeDefined()
-    expect(parsed.tui).toBeDefined()
-    expect(parsed.defaultKvTtlMs).toBeDefined()
-  })
+		const content = readFileSync(bundledConfigPath, 'utf-8')
+		expect(content).toBeDefined()
 
-  test('bundled config compaction includes maxContextTokens', () => {
-    const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
-    const content = readFileSync(bundledConfigPath, 'utf-8')
-    
-    const stripComments = (text: string): string => {
-      let result = text
-      result = result.replace(/\/\*[\s\S]*?\*\//g, '')
-      result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
-      return result
-    }
-    
-    const stripTrailingCommas = (text: string): string => {
-      let result = text
-      result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
-      result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
-      return result
-    }
-    
-    const cleaned = stripComments(content)
-    const normalized = stripTrailingCommas(cleaned)
-    const parsed = JSON.parse(normalized)
-    
-    expect(parsed.compaction?.maxContextTokens).toBeDefined()
-  })
+		const config = loadPluginConfig()
+		const parsed = loadPluginConfig()
+		expect(parsed).toBeDefined()
+	})
 
-  test('bundled config includes dataDir and defaultKvTtlMs', () => {
-    const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
-    const content = readFileSync(bundledConfigPath, 'utf-8')
-    
-    const stripComments = (text: string): string => {
-      let result = text
-      result = result.replace(/\/\*[\s\S]*?\*\//g, '')
-      result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
-      return result
-    }
-    
-    const stripTrailingCommas = (text: string): string => {
-      let result = text
-      result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
-      result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
-      return result
-    }
-    
-    const cleaned = stripComments(content)
-    const normalized = stripTrailingCommas(cleaned)
-    const parsed = JSON.parse(normalized)
-    
-    expect(parsed.dataDir).toBeDefined()
-    expect(parsed.defaultKvTtlMs).toBe(604800000)
-  })
+	test('bundled config includes all supported top-level keys', () => {
+		const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
+		const content = readFileSync(bundledConfigPath, 'utf-8')
 
-  test('bundled config includes loop.worktreeLogging and is disabled by default', () => {
-    const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
-    const content = readFileSync(bundledConfigPath, 'utf-8')
-    
-    const stripComments = (text: string): string => {
-      let result = text
-      result = result.replace(/\/\*[\s\S]*?\*\//g, '')
-      result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
-      return result
-    }
-    
-    const stripTrailingCommas = (text: string): string => {
-      let result = text
-      result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
-      result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
-      return result
-    }
-    
-    const cleaned = stripComments(content)
-    const normalized = stripTrailingCommas(cleaned)
-    const parsed = JSON.parse(normalized)
-    
-    expect(parsed.loop?.worktreeLogging).toBeDefined()
-    expect(parsed.loop?.worktreeLogging?.enabled).toBe(false)
-  })
+		const stripComments = (text: string): string => {
+			let result = text
+			result = result.replace(/\/\*[\s\S]*?\*\//g, '')
+			result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
+			return result
+		}
 
-  test('JSONC parsing preserves worktreeLogging config', () => {
-    const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
-    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
-    process.env['XDG_CONFIG_HOME'] = testConfigDir
+		const stripTrailingCommas = (text: string): string => {
+			let result = text
+			result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
+			result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
+			return result
+		}
 
-    const configWithWorktreeLogging = {
-      loop: {
-        enabled: true,
-        worktreeLogging: {
-          enabled: true,
-          directory: '/tmp/loop-logs',
-        },
-      },
-    }
+		const cleaned = stripComments(content)
+		const normalized = stripTrailingCommas(cleaned)
+		const parsed = JSON.parse(normalized)
 
-    writeFileSync(configPath, JSON.stringify(configWithWorktreeLogging))
+		expect(parsed.dataDir).toBeDefined()
+		expect(parsed.logging).toBeDefined()
+		expect(parsed.compaction).toBeDefined()
+		expect(parsed.messagesTransform).toBeDefined()
+		expect(parsed.executionModel).toBeDefined()
+		expect(parsed.auditorModel).toBeDefined()
+		expect(parsed.loop).toBeDefined()
+		expect(parsed.sandbox).toBeDefined()
+		expect(parsed.graph).toBeDefined()
+		expect(parsed.tui).toBeDefined()
+		expect(parsed.defaultKvTtlMs).toBeDefined()
+	})
 
-    const config = loadPluginConfig()
-    expect(config.loop?.worktreeLogging).toBeDefined()
-    expect(config.loop?.worktreeLogging?.enabled).toBe(true)
-    expect(config.loop?.worktreeLogging?.directory).toBe('/tmp/loop-logs')
-  })
+	test('bundled config compaction includes maxContextTokens', () => {
+		const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
+		const content = readFileSync(bundledConfigPath, 'utf-8')
+
+		const stripComments = (text: string): string => {
+			let result = text
+			result = result.replace(/\/\*[\s\S]*?\*\//g, '')
+			result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
+			return result
+		}
+
+		const stripTrailingCommas = (text: string): string => {
+			let result = text
+			result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
+			result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
+			return result
+		}
+
+		const cleaned = stripComments(content)
+		const normalized = stripTrailingCommas(cleaned)
+		const parsed = JSON.parse(normalized)
+
+		expect(parsed.compaction?.maxContextTokens).toBeDefined()
+	})
+
+	test('bundled config includes dataDir and defaultKvTtlMs', () => {
+		const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
+		const content = readFileSync(bundledConfigPath, 'utf-8')
+
+		const stripComments = (text: string): string => {
+			let result = text
+			result = result.replace(/\/\*[\s\S]*?\*\//g, '')
+			result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
+			return result
+		}
+
+		const stripTrailingCommas = (text: string): string => {
+			let result = text
+			result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
+			result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
+			return result
+		}
+
+		const cleaned = stripComments(content)
+		const normalized = stripTrailingCommas(cleaned)
+		const parsed = JSON.parse(normalized)
+
+		expect(parsed.dataDir).toBeDefined()
+		expect(parsed.defaultKvTtlMs).toBe(604800000)
+	})
+
+	test('bundled config includes loop.worktreeLogging and is disabled by default', () => {
+		const bundledConfigPath = join(import.meta.dir, '..', 'forge-config.jsonc')
+		const content = readFileSync(bundledConfigPath, 'utf-8')
+
+		const stripComments = (text: string): string => {
+			let result = text
+			result = result.replace(/\/\*[\s\S]*?\*\//g, '')
+			result = result.replace(/(^|[^:])(\/\/.*$)/gm, '$1')
+			return result
+		}
+
+		const stripTrailingCommas = (text: string): string => {
+			let result = text
+			result = result.replace(/,(\s*}[ \t\n\r]*)/g, '$1')
+			result = result.replace(/,(\s*][ \t\n\r]*)/g, '$1')
+			return result
+		}
+
+		const cleaned = stripComments(content)
+		const normalized = stripTrailingCommas(cleaned)
+		const parsed = JSON.parse(normalized)
+
+		expect(parsed.loop?.worktreeLogging).toBeDefined()
+		expect(parsed.loop?.worktreeLogging?.enabled).toBe(false)
+	})
+
+	test('JSONC parsing preserves worktreeLogging config', () => {
+		const configPath = join(testConfigDir, 'opencode', 'forge-config.jsonc')
+		mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
+		process.env['XDG_CONFIG_HOME'] = testConfigDir
+
+		const configWithWorktreeLogging = {
+			loop: {
+				enabled: true,
+				worktreeLogging: {
+					enabled: true,
+					directory: '/tmp/loop-logs',
+				},
+			},
+		}
+
+		writeFileSync(configPath, JSON.stringify(configWithWorktreeLogging))
+
+		const config = loadPluginConfig()
+		expect(config.loop?.worktreeLogging).toBeDefined()
+		expect(config.loop?.worktreeLogging?.enabled).toBe(true)
+		expect(config.loop?.worktreeLogging?.directory).toBe('/tmp/loop-logs')
+	})
 })

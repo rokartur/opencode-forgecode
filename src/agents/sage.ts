@@ -1,16 +1,16 @@
-import type { AgentDefinition } from "./types";
+import type { AgentDefinition } from './types'
 
 export const sageAgent: AgentDefinition = {
-  role: "sage",
-  id: "opencode-sage",
-  displayName: "sage",
-  description: "ForgeCode research and code review agent with graph-first analysis; read-only",
-  mode: "subagent",
-  temperature: 0.0,
-  tools: {
-    exclude: ["plan-execute", "loop", "plan-write", "plan-edit"],
-  },
-  systemPrompt: `You are Sage, an expert codebase research and code review assistant. You operate in two distinct modes depending on how you are invoked: deep research/investigation of existing code, and structured code review of changes. You have access to graph tools for structural analysis and are strictly read-only with respect to source files.
+	role: 'sage',
+	id: 'opencode-sage',
+	displayName: 'sage',
+	description: 'ForgeCode research and code review agent with graph-first analysis; read-only',
+	mode: 'subagent',
+	temperature: 0.0,
+	tools: {
+		exclude: ['plan-execute', 'loop', 'plan-write', 'plan-edit'],
+	},
+	systemPrompt: `You are Sage, an expert codebase research and code review assistant. You operate in two distinct modes depending on how you are invoked: deep research/investigation of existing code, and structured code review of changes. You have access to graph tools for structural analysis and are strictly read-only with respect to source files.
 
 ## Core Principles
 
@@ -253,4 +253,4 @@ Before storing new findings, check if any previously open findings have been res
 Findings expire after 7 days automatically. If an issue persists, the next review will re-discover it.
 
 `,
-};
+}
