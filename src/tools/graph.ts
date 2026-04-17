@@ -73,12 +73,13 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
     }),
 
     'graph-query': tool({
-      description: 'Query file-level graph information (dependencies, dependents, co-changes, etc.)',
+      description: 'Query file-level graph information (dependencies, dependents, co-changes, change impact, etc.)',
       args: {
         action: z
-          .enum(['top_files', 'file_deps', 'file_dependents', 'cochanges', 'blast_radius', 'packages', 'file_symbols'])
+          .enum(['top_files', 'file_deps', 'file_dependents', 'cochanges', 'blast_radius', 'packages', 'file_symbols', 'change_impact'])
           .describe('Query type'),
         file: z.string().optional().describe('File path (relative to project root)'),
+        files: z.string().optional().describe('Comma-separated file paths (for change_impact)'),
         limit: z.number().optional().default(20).describe('Maximum results'),
       },
       execute: async (args) => {
@@ -146,6 +147,18 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
                 .join('\n')
             }
 
+            case 'change_impact': {
+              const filePaths = args.files?.split(',').map(f => f.trim()).filter(Boolean) || []
+              if (filePaths.length === 0) return 'files parameter required (comma-separated paths)'
+              const result = await graphService.getChangeImpact(filePaths)
+              if (result.impactedFiles.length === 0) return `No impacted files found for: ${result.changedFiles.join(', ')}`
+              const header = `**${result.totalAffected} files affected** by changes to ${result.changedFiles.length} file(s):\n`
+              const body = result.impactedFiles
+                .map(f => `- ${'  '.repeat(f.depth - 1)}${f.path} (depth: ${f.depth})`)
+                .join('\n')
+              return header + body
+            }
+
             default:
               return 'Unknown action'
           }
@@ -159,7 +172,7 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
     'graph-symbols': tool({
       description: 'Query symbol-level graph information (find, search, callers, callees, etc.)',
       args: {
-        action: z.enum(['find', 'search', 'signature', 'callers', 'callees']).describe('Query type'),
+        action: z.enum(['find', 'search', 'signature', 'callers', 'callees', 'references']).describe('Query type'),
         name: z.string().optional().describe('Symbol name'),
         file: z.string().optional().describe('File path'),
         kind: z.string().optional().describe('Symbol kind filter'),
@@ -231,6 +244,19 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
                 .join('\n')
             }
 
+            case 'references': {
+              if (!args.name) return 'name parameter required'
+              const results = await graphService.getSymbolReferences(args.name, args.limit)
+              if (results.length === 0) return `No references found for "${args.name}"`
+              return results
+                .map(r => {
+                  const loc = r.line > 0 ? `:${r.line}` : ''
+                  const ctx = r.context ? ` (${r.context})` : ''
+                  return `- [${r.kind}] **${r.path}**${loc}${ctx}`
+                })
+                .join('\n')
+            }
+
             default:
               return 'Unknown action'
           }
@@ -242,9 +268,9 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
     }),
 
     'graph-analyze': tool({
-      description: 'Analyze code quality (unused exports, duplication, near-duplicates)',
+      description: 'Analyze code quality (unused exports, duplication, near-duplicates, orphan files, circular dependencies)',
       args: {
-        action: z.enum(['unused_exports', 'duplication', 'near_duplicates']).describe('Analysis type'),
+        action: z.enum(['unused_exports', 'duplication', 'near_duplicates', 'orphan_files', 'circular_deps']).describe('Analysis type'),
         file: z.string().optional().describe('File path (optional)'),
         limit: z.number().optional().default(20).describe('Maximum results'),
         threshold: z.number().optional().default(0.8).describe('Similarity threshold (for near_duplicates)'),
@@ -290,6 +316,22 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
                   (r) =>
                     `**Similarity**: ${(r.similarity * 100).toFixed(1)}%\n- A: ${r.a.path}:${r.a.line} (${r.a.name})\n- B: ${r.b.path}:${r.b.line} (${r.b.name})`
                 )
+                .join('\n\n')
+            }
+
+            case 'orphan_files': {
+              const results = await graphService.getOrphanFiles(args.limit)
+              if (results.length === 0) return 'No orphan files found.'
+              return results
+                .map(r => `- **${r.path}** (${r.language}, ${r.lineCount} lines, ${r.symbolCount} symbols)`)
+                .join('\n')
+            }
+
+            case 'circular_deps': {
+              const results = await graphService.getCircularDependencies(args.limit)
+              if (results.length === 0) return 'No circular dependencies found.'
+              return results
+                .map((r, i) => `**Cycle ${i + 1}** (${r.length} files):\n${r.cycle.map(p => `  - ${p}`).join('\n')}`)
                 .join('\n\n')
             }
 

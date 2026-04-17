@@ -331,6 +331,7 @@ function createTables(db: Database): void {
   db.run(`CREATE INDEX IF NOT EXISTS idx_refs_file_id ON refs(file_id)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_refs_source_file_id ON refs(source_file_id)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_refs_import_source ON refs(import_source)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_refs_name ON refs(name)`)
 
   // Calls table (call graph)
   db.run(`

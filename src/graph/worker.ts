@@ -128,6 +128,28 @@ rpcServer.register('render', async (args: unknown[]) => {
   return repoMap.render(opts)
 })
 
+rpcServer.register('getOrphanFiles', async (args: unknown[]) => {
+  const limit = (args[0] as number) || 50
+  return repoMap.getOrphanFiles(limit)
+})
+
+rpcServer.register('getCircularDependencies', async (args: unknown[]) => {
+  const limit = (args[0] as number) || 20
+  return repoMap.getCircularDependencies(limit)
+})
+
+rpcServer.register('getChangeImpact', async (args: unknown[]) => {
+  const paths = (args[0] as string[]) || []
+  const maxDepth = (args[1] as number) || 5
+  return repoMap.getChangeImpact(paths, maxDepth)
+})
+
+rpcServer.register('getSymbolReferences', async (args: unknown[]) => {
+  const name = (args[0] as string) || ''
+  const limit = (args[1] as number) || 50
+  return repoMap.getSymbolReferences(name, limit)
+})
+
 rpcServer.register('onFileChanged', async (args: unknown[]) => {
   const path = (args[0] as string) || ''
   return repoMap.onFileChanged(path)

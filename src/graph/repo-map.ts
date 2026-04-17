@@ -33,6 +33,11 @@ import type {
   SymbolKind,
   PrepareScanResult,
   ScanBatchResult,
+  OrphanFileResult,
+  CircularDependencyResult,
+  ChangeImpactResult,
+  ImpactedFile,
+  SymbolReferenceResult,
 } from './types'
 
 interface IndexedFile {
@@ -212,6 +217,54 @@ export class RepoMap {
         INSERT INTO calls (caller_symbol_id, callee_name, callee_symbol_id, callee_file_id, line)
         VALUES (?, ?, ?, ?, ?)
       `),
+      // Unused exports - single anti-join query
+      getUnusedExportsQuery: this.db.prepare(`
+        SELECT s.id, s.name, s.kind, s.line, s.end_line, f.path, f.line_count
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE s.is_exported = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM refs r WHERE r.name = s.name AND r.source_file_id IS NOT NULL
+          )
+        LIMIT ?
+      `),
+      // Orphan files - files with no incoming edges
+      getOrphanFilesQuery: this.db.prepare(`
+        SELECT f.path, f.language, f.line_count, f.symbol_count
+        FROM files f
+        LEFT JOIN edges e ON e.target_file_id = f.id
+        WHERE e.target_file_id IS NULL
+          AND f.is_barrel = 0
+          AND f.path NOT LIKE '%.test.%'
+          AND f.path NOT LIKE '%.spec.%'
+          AND f.path NOT LIKE '%_test.%'
+        ORDER BY f.line_count DESC
+        LIMIT ?
+      `),
+      // Reverse edge lookup for change impact BFS
+      getEdgesSourceIdsByTarget: this.db.prepare(
+        'SELECT source_file_id FROM edges WHERE target_file_id = ?'
+      ),
+      // Symbol references
+      getRefsByName: this.db.prepare(`
+        SELECT f.path, r.import_source
+        FROM refs r
+        JOIN files f ON r.file_id = f.id
+        WHERE r.name = ?
+      `),
+      getCallsByCalleeName: this.db.prepare(`
+        SELECT c.line, s.name as caller_name, f.path
+        FROM calls c
+        JOIN symbols s ON c.caller_symbol_id = s.id
+        JOIN files f ON s.file_id = f.id
+        WHERE c.callee_name = ?
+      `),
+      getReexportsByName: this.db.prepare(`
+        SELECT f.path, s.line
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE s.name = ? AND s.is_exported = 1 AND f.is_barrel = 1
+      `),
     }
   }
 
@@ -330,6 +383,7 @@ export class RepoMap {
     this.linkTestFiles()
     await this.buildCallGraph()
     await this.buildCoChanges()
+    this.rescueOrphans()
   }
 
   /**
@@ -943,35 +997,25 @@ export class RepoMap {
   }
 
   getUnusedExports(limit = 50): UnusedExportResult[] {
-    const exports = this.db.prepare(`
-      SELECT s.*, f.path, f.line_count
-      FROM symbols s
-      JOIN files f ON s.file_id = f.id
-      WHERE s.is_exported = 1
-      LIMIT ?
-    `).all(limit) as Array<DbSymbol & { path: string; line_count: number }>
-    
-    const unused: UnusedExportResult[] = []
-    
-    for (const exp of exports) {
-      const used = this.db.prepare(
-        'SELECT 1 FROM refs WHERE name = ? AND source_file_id IS NOT NULL LIMIT 1'
-      ).get(exp.name)
-      
-      if (!used) {
-        unused.push({
-          name: exp.name,
-          path: exp.path,
-          kind: exp.kind,
-          line: exp.line,
-          endLine: exp.end_line,
-          lineCount: exp.line_count,
-          usedInternally: false,
-        })
-      }
-    }
-    
-    return unused
+    const results = this.stmts.getUnusedExportsQuery.all(limit) as Array<{
+      id: number
+      name: string
+      kind: string
+      line: number
+      end_line: number
+      path: string
+      line_count: number
+    }>
+
+    return results.map(r => ({
+      name: r.name,
+      path: r.path,
+      kind: r.kind,
+      line: r.line,
+      endLine: r.end_line,
+      lineCount: r.line_count,
+      usedInternally: false,
+    }))
   }
 
   getDuplicateStructures(limit = 20): DuplicateStructureResult[] {
@@ -1003,36 +1047,74 @@ export class RepoMap {
       name: string
       line: number
       end_line: number
-      minhash: Uint32Array
+      minhash: Buffer
     }>
-    
-    const results: NearDuplicateResult[] = []
-    
-    for (let i = 0; i < signatures.length; i++) {
-      for (let j = i + 1; j < signatures.length; j++) {
-        const a = signatures[i]
-        const b = signatures[j]
-        
-        if (a.file_id === b.file_id) continue
-        
-        const similarity = jaccardSimilarity(a.minhash, b.minhash)
-        
-        if (similarity >= threshold) {
-          const fileA = this.stmts.getFileById.get(a.file_id) as IndexedFile | undefined
-          const fileB = this.stmts.getFileById.get(b.file_id) as IndexedFile | undefined
-          
-          if (fileA && fileB) {
-            results.push({
-              similarity,
-              a: { path: fileA.path, line: a.line, name: a.name },
-              b: { path: fileB.path, line: b.line, name: b.name },
-            })
-          }
+
+    if (signatures.length === 0) return []
+
+    // Convert BLOB minhash buffers to Uint32Array views
+    const parsed = signatures.map(s => ({
+      ...s,
+      minhashArr: new Uint32Array(s.minhash.buffer, s.minhash.byteOffset, s.minhash.byteLength / 4),
+    }))
+
+    // LSH banding: 16 bands of 8 rows each (128 total hash values)
+    const LSH_BANDS = 16
+    const ROWS_PER_BAND = 8
+    const MAX_BUCKET_SIZE = 100
+
+    const buckets = new Map<string, number[]>()
+    for (let idx = 0; idx < parsed.length; idx++) {
+      const mh = parsed[idx].minhashArr
+      for (let b = 0; b < LSH_BANDS; b++) {
+        const offset = b * ROWS_PER_BAND
+        const slice = mh.subarray(offset, offset + ROWS_PER_BAND)
+        const key = `${b}:${Bun.hash(new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength))}`
+        let bucket = buckets.get(key)
+        if (!bucket) { bucket = []; buckets.set(key, bucket) }
+        bucket.push(idx)
+      }
+    }
+
+    // Collect candidate pairs from shared buckets
+    const candidatePairs = new Set<string>()
+    for (const members of buckets.values()) {
+      if (members.length < 2 || members.length > MAX_BUCKET_SIZE) continue
+      for (let i = 0; i < members.length; i++) {
+        for (let j = i + 1; j < members.length; j++) {
+          const a = Math.min(members[i], members[j])
+          const b = Math.max(members[i], members[j])
+          candidatePairs.add(`${a}:${b}`)
         }
       }
     }
-    
-    return results.slice(0, limit)
+
+    // Compare only candidate pairs
+    const results: NearDuplicateResult[] = []
+    for (const pairKey of candidatePairs) {
+      const [ai, bi] = pairKey.split(':').map(Number)
+      const a = parsed[ai]
+      const b = parsed[bi]
+
+      if (a.file_id === b.file_id) continue
+
+      const similarity = jaccardSimilarity(a.minhashArr, b.minhashArr)
+
+      if (similarity >= threshold) {
+        const fileA = this.stmts.getFileById.get(a.file_id) as IndexedFile | undefined
+        const fileB = this.stmts.getFileById.get(b.file_id) as IndexedFile | undefined
+
+        if (fileA && fileB) {
+          results.push({
+            similarity,
+            a: { path: fileA.path, line: a.line, name: a.name },
+            b: { path: fileB.path, line: b.line, name: b.name },
+          })
+        }
+      }
+    }
+
+    return results.sort((a, b) => b.similarity - a.similarity).slice(0, limit)
   }
 
   getExternalPackages(limit = 50): ExternalPackageResult[] {
@@ -1050,6 +1132,214 @@ export class RepoMap {
       fileCount: p.file_count,
       specifiers: p.specifiers ? p.specifiers.split(',').map(s => s.trim()) : [],
     }))
+  }
+
+  getOrphanFiles(limit = 50): OrphanFileResult[] {
+    const results = this.stmts.getOrphanFilesQuery.all(limit) as Array<{
+      path: string
+      language: string
+      line_count: number
+      symbol_count: number
+    }>
+
+    return results.map(r => ({
+      path: r.path,
+      language: r.language,
+      lineCount: r.line_count,
+      symbolCount: r.symbol_count,
+    }))
+  }
+
+  getCircularDependencies(limit = 20): CircularDependencyResult[] {
+    const edges = this.stmts.getAllEdges.all() as Edge[]
+    const files = this.stmts.getAllFiles.all() as IndexedFile[]
+
+    if (files.length === 0 || edges.length === 0) return []
+
+    // Build adjacency list
+    const adj = new Map<number, number[]>()
+    const selfEdges = new Set<number>()
+    for (const edge of edges) {
+      if (edge.source_file_id === edge.target_file_id) {
+        selfEdges.add(edge.source_file_id)
+        continue
+      }
+      let list = adj.get(edge.source_file_id)
+      if (!list) { list = []; adj.set(edge.source_file_id, list) }
+      list.push(edge.target_file_id)
+    }
+
+    // Iterative Tarjan's SCC
+    const index = new Map<number, number>()
+    const lowlink = new Map<number, number>()
+    const onStack = new Set<number>()
+    const stack: number[] = []
+    let idx = 0
+    const sccs: number[][] = []
+
+    const allNodeIds = files.map(f => f.id)
+
+    for (const startNode of allNodeIds) {
+      if (index.has(startNode)) continue
+
+      // Iterative DFS with explicit call stack
+      // Each frame: [node, neighborIndex, isReturning]
+      const callStack: Array<{ node: number; ni: number }> = []
+      index.set(startNode, idx)
+      lowlink.set(startNode, idx)
+      idx++
+      stack.push(startNode)
+      onStack.add(startNode)
+      callStack.push({ node: startNode, ni: 0 })
+
+      while (callStack.length > 0) {
+        const frame = callStack[callStack.length - 1]
+        const neighbors = adj.get(frame.node) || []
+
+        if (frame.ni < neighbors.length) {
+          const w = neighbors[frame.ni]
+          frame.ni++
+
+          if (!index.has(w)) {
+            index.set(w, idx)
+            lowlink.set(w, idx)
+            idx++
+            stack.push(w)
+            onStack.add(w)
+            callStack.push({ node: w, ni: 0 })
+          } else if (onStack.has(w)) {
+            lowlink.set(frame.node, Math.min(lowlink.get(frame.node)!, lowlink.get(w)!))
+          }
+        } else {
+          // Done with this node — check if it's an SCC root
+          if (lowlink.get(frame.node) === index.get(frame.node)) {
+            const scc: number[] = []
+            let w: number
+            do {
+              w = stack.pop()!
+              onStack.delete(w)
+              scc.push(w)
+            } while (w !== frame.node)
+            sccs.push(scc)
+          }
+
+          callStack.pop()
+          if (callStack.length > 0) {
+            const parent = callStack[callStack.length - 1]
+            lowlink.set(parent.node, Math.min(lowlink.get(parent.node)!, lowlink.get(frame.node)!))
+          }
+        }
+      }
+    }
+
+    // Resolve file IDs to paths
+    const filePathMap = new Map<number, string>()
+    for (const f of files) filePathMap.set(f.id, f.path)
+
+    const results: CircularDependencyResult[] = []
+    for (const scc of sccs) {
+      if (scc.length > 1 || (scc.length === 1 && selfEdges.has(scc[0]))) {
+        results.push({
+          cycle: scc.map(id => filePathMap.get(id) || ''),
+          length: scc.length,
+        })
+      }
+    }
+
+    return results.sort((a, b) => b.length - a.length).slice(0, limit)
+  }
+
+  getChangeImpact(paths: string[], maxDepth = 5): ChangeImpactResult {
+    const startIds: number[] = []
+    const validPaths: string[] = []
+    for (const p of paths) {
+      const file = this.stmts.getFileByPath.get(p) as IndexedFile | undefined
+      if (file) {
+        startIds.push(file.id)
+        validPaths.push(p)
+      }
+    }
+
+    if (startIds.length === 0) return { changedFiles: [], impactedFiles: [], totalAffected: 0 }
+
+    // Multi-source BFS on reverse edge direction (who depends on changed files)
+    const visited = new Map<number, number>()
+    const queue: Array<{ id: number; depth: number }> = []
+
+    for (const id of startIds) {
+      visited.set(id, 0)
+      queue.push({ id, depth: 0 })
+    }
+
+    while (queue.length > 0) {
+      const { id, depth } = queue.shift()!
+      if (depth >= maxDepth) continue
+
+      const dependents = this.stmts.getEdgesSourceIdsByTarget.all(id) as Array<{ source_file_id: number }>
+      for (const dep of dependents) {
+        if (!visited.has(dep.source_file_id)) {
+          visited.set(dep.source_file_id, depth + 1)
+          queue.push({ id: dep.source_file_id, depth: depth + 1 })
+        }
+      }
+    }
+
+    // Exclude seed files from results
+    const seedSet = new Set(startIds)
+    const impactedFiles: ImpactedFile[] = []
+    for (const [fileId, depth] of visited) {
+      if (seedSet.has(fileId)) continue
+      const file = this.stmts.getFileById.get(fileId) as IndexedFile | undefined
+      if (file) {
+        impactedFiles.push({ path: file.path, depth })
+      }
+    }
+
+    impactedFiles.sort((a, b) => a.depth - b.depth)
+
+    return {
+      changedFiles: validPaths,
+      impactedFiles,
+      totalAffected: impactedFiles.length,
+    }
+  }
+
+  getSymbolReferences(name: string, limit = 50): SymbolReferenceResult[] {
+    const results: SymbolReferenceResult[] = []
+
+    // Import references
+    const imports = this.stmts.getRefsByName.all(name) as Array<{ path: string; import_source: string }>
+    for (const imp of imports) {
+      results.push({
+        kind: 'import',
+        path: imp.path,
+        line: 0,
+        context: `import { ${name} } from '${imp.import_source}'`,
+      })
+    }
+
+    // Call sites
+    const calls = this.stmts.getCallsByCalleeName.all(name) as Array<{ line: number; caller_name: string; path: string }>
+    for (const call of calls) {
+      results.push({
+        kind: 'call',
+        path: call.path,
+        line: call.line,
+        context: call.caller_name,
+      })
+    }
+
+    // Re-exports (barrel files)
+    const reexports = this.stmts.getReexportsByName.all(name) as Array<{ path: string; line: number }>
+    for (const re of reexports) {
+      results.push({
+        kind: 'reexport',
+        path: re.path,
+        line: re.line,
+      })
+    }
+
+    return results.slice(0, limit)
   }
 
   async onFileChanged(path: string): Promise<{ status: string }> {
@@ -1282,6 +1572,49 @@ export class RepoMap {
   }
 
   rescueOrphans(): void {
-    // Ensure all files have at least some graph connections
+    const orphans = this.db.prepare(`
+      SELECT f.id, f.path
+      FROM files f
+      LEFT JOIN edges e ON e.target_file_id = f.id
+      WHERE e.target_file_id IS NULL
+        AND f.is_barrel = 0
+    `).all() as Array<{ id: number; path: string }>
+
+    if (orphans.length === 0) return
+
+    const orphanIds = new Set(orphans.map(o => o.id))
+
+    this.db.transaction(() => {
+      for (const orphan of orphans) {
+        let rescued = false
+
+        // Strategy 1: co-change evidence (count >= 2 with a non-orphan)
+        const cochanges = this.stmts.getCoChanges.all(orphan.id, orphan.id, orphan.id) as Array<{ other_id: number; count: number }>
+        for (const cc of cochanges) {
+          if (cc.count >= 2 && !orphanIds.has(cc.other_id)) {
+            this.stmts.insertEdge.run([cc.other_id, orphan.id, 0.5, 0.5])
+            rescued = true
+            break
+          }
+        }
+        if (rescued) continue
+
+        // Strategy 2: directory proximity — find a non-orphan sibling
+        const dir = orphan.path.substring(0, orphan.path.lastIndexOf('/'))
+        if (dir) {
+          const sibling = this.db.prepare(`
+            SELECT f.id FROM files f
+            WHERE f.path LIKE ? || '/%'
+              AND f.id != ?
+              AND EXISTS (SELECT 1 FROM edges e WHERE e.target_file_id = f.id)
+            LIMIT 1
+          `).get(`${dir}`, orphan.id) as { id: number } | undefined
+
+          if (sibling) {
+            this.stmts.insertEdge.run([sibling.id, orphan.id, 0.3, 0.3])
+          }
+        }
+      }
+    })()
   }
 }

@@ -309,3 +309,33 @@ test('exported variable produces one symbol entry', async () => {
   expect(varSymbols).toHaveLength(1)
   expect(varSymbols[0].name).toBe('MY_CONSTANT')
 })
+
+test('getNearDuplicates returns globally top-N by similarity', async () => {
+  const boilerplate = Array.from({ length: 30 }, (_, i) => `  const v${i} = ${i} * 2`).join('\n')
+  const mkFile = (suffix: string) => `export function run() {\n${boilerplate}\n${suffix}\n}`
+
+  // 4 pairs at descending similarity levels, all above 0.8
+  writeFileSync(join(testDir, 'a1.ts'), mkFile('  return 1'))
+  writeFileSync(join(testDir, 'a2.ts'), mkFile('  return 1'))         // ~identical to a1
+  writeFileSync(join(testDir, 'b1.ts'), mkFile('  return 1 + 2'))
+  writeFileSync(join(testDir, 'b2.ts'), mkFile('  return 1 + 3'))     // slightly differs
+  writeFileSync(join(testDir, 'c1.ts'), mkFile('  return 1 + 2 + 3'))
+  writeFileSync(join(testDir, 'c2.ts'), mkFile('  return 1 + 2 + 4 + 5')) // more diff
+  writeFileSync(join(testDir, 'd1.ts'), mkFile('  return 1 + 2 + 3 + 4'))
+  writeFileSync(join(testDir, 'd2.ts'), mkFile('  return 1 + 2 + 3 + 5 + 6 + 7')) // most diff
+
+  const { execSync } = await import('child_process')
+  execSync('git add .', { cwd: testDir })
+  await repoMap.scan()
+
+  const result = repoMap.getNearDuplicates(0.8, 3)
+
+  expect(result.length).toBeLessThanOrEqual(3)
+  expect(result.length).toBeGreaterThan(0)
+  for (let i = 0; i < result.length - 1; i++) {
+    expect(result[i].similarity).toBeGreaterThanOrEqual(result[i + 1].similarity)
+  }
+  expect(result[0].similarity).toBeGreaterThanOrEqual(0.8)
+  // The near-identical a1/a2 pair must not be displaced by weaker pairs
+  expect(result.some(r => r.similarity >= 0.95)).toBe(true)
+})

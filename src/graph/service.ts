@@ -18,6 +18,10 @@ import type {
   DuplicateStructureResult,
   NearDuplicateResult,
   ExternalPackageResult,
+  OrphanFileResult,
+  CircularDependencyResult,
+  ChangeImpactResult,
+  SymbolReferenceResult,
 } from './types'
 import { INDEXABLE_EXTENSIONS } from './constants'
 import { IGNORED_DIRS, IGNORED_EXTS } from './utils'
@@ -120,6 +124,28 @@ export interface GraphService {
    * @param limit - Maximum number of results. Defaults to 50.
    */
   getExternalPackages(limit?: number): Promise<ExternalPackageResult[]>
+  /**
+   * Returns files with no incoming edges (nobody imports them).
+   * @param limit - Maximum number of results. Defaults to 50.
+   */
+  getOrphanFiles(limit?: number): Promise<OrphanFileResult[]>
+  /**
+   * Returns circular dependency cycles in the file dependency graph.
+   * @param limit - Maximum number of cycles. Defaults to 20.
+   */
+  getCircularDependencies(limit?: number): Promise<CircularDependencyResult[]>
+  /**
+   * Returns the transitive impact of changing a set of files.
+   * @param paths - Relative paths of changed files.
+   * @param maxDepth - Maximum BFS traversal depth. Defaults to 5.
+   */
+  getChangeImpact(paths: string[], maxDepth?: number): Promise<ChangeImpactResult>
+  /**
+   * Returns all references to a symbol (imports, calls, re-exports).
+   * @param name - Symbol name to search for.
+   * @param limit - Maximum number of results. Defaults to 50.
+   */
+  getSymbolReferences(name: string, limit?: number): Promise<SymbolReferenceResult[]>
   /**
    * Renders a text visualization of the code graph.
    * @param opts - Rendering options.
@@ -667,6 +693,26 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
     async getExternalPackages(limit = 50): Promise<ExternalPackageResult[]> {
       if (!initialized) await initialize()
       return client.getExternalPackages(limit)
+    },
+
+    async getOrphanFiles(limit = 50): Promise<OrphanFileResult[]> {
+      if (!initialized) await initialize()
+      return client.getOrphanFiles(limit)
+    },
+
+    async getCircularDependencies(limit = 20): Promise<CircularDependencyResult[]> {
+      if (!initialized) await initialize()
+      return client.getCircularDependencies(limit)
+    },
+
+    async getChangeImpact(paths: string[], maxDepth = 5): Promise<ChangeImpactResult> {
+      if (!initialized) await initialize()
+      return client.getChangeImpact(paths, maxDepth)
+    },
+
+    async getSymbolReferences(name: string, limit = 50): Promise<SymbolReferenceResult[]> {
+      if (!initialized) await initialize()
+      return client.getSymbolReferences(name, limit)
     },
 
     async render(opts?: { maxFiles?: number; maxSymbols?: number }): Promise<{ content: string; paths: string[] }> {

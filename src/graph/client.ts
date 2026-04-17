@@ -15,6 +15,10 @@ import type {
   ExternalPackageResult,
   PrepareScanResult,
   ScanBatchResult,
+  OrphanFileResult,
+  CircularDependencyResult,
+  ChangeImpactResult,
+  SymbolReferenceResult,
 } from './types'
 import type { Logger } from '../types'
 
@@ -170,6 +174,26 @@ export class GraphClient {
   async render(opts?: { maxFiles?: number; maxSymbols?: number }): Promise<{ content: string; paths: string[] }> {
     if (!this.client) throw new Error('Graph client not initialized')
     return this.client.call<{ content: string; paths: string[] }>('render', [opts])
+  }
+
+  async getOrphanFiles(limit = 50): Promise<OrphanFileResult[]> {
+    if (!this.client) throw new Error('Graph client not initialized')
+    return this.client.call<OrphanFileResult[]>('getOrphanFiles', [limit])
+  }
+
+  async getCircularDependencies(limit = 20): Promise<CircularDependencyResult[]> {
+    if (!this.client) throw new Error('Graph client not initialized')
+    return this.client.call<CircularDependencyResult[]>('getCircularDependencies', [limit])
+  }
+
+  async getChangeImpact(paths: string[], maxDepth = 5): Promise<ChangeImpactResult> {
+    if (!this.client) throw new Error('Graph client not initialized')
+    return this.client.call<ChangeImpactResult>('getChangeImpact', [paths, maxDepth])
+  }
+
+  async getSymbolReferences(name: string, limit = 50): Promise<SymbolReferenceResult[]> {
+    if (!this.client) throw new Error('Graph client not initialized')
+    return this.client.call<SymbolReferenceResult[]>('getSymbolReferences', [name, limit])
   }
 
   async onFileChanged(absPath: string): Promise<void> {

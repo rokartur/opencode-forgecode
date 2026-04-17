@@ -342,3 +342,38 @@ export interface ScanBatchResult {
   nextOffset: number
   totalFiles: number
 }
+
+/** Orphan file result — files with no incoming edges (nobody imports them) */
+export interface OrphanFileResult {
+  path: string
+  language: string
+  lineCount: number
+  symbolCount: number
+}
+
+/** Circular dependency result — a cycle in the file dependency graph */
+export interface CircularDependencyResult {
+  cycle: string[]
+  length: number
+}
+
+/** A file impacted by a set of changes */
+export interface ImpactedFile {
+  path: string
+  depth: number
+}
+
+/** Multi-file change impact analysis result */
+export interface ChangeImpactResult {
+  changedFiles: string[]
+  impactedFiles: ImpactedFile[]
+  totalAffected: number
+}
+
+/** Symbol reference result — where a symbol is used across the codebase */
+export interface SymbolReferenceResult {
+  kind: 'import' | 'call' | 'reexport'
+  path: string
+  line: number
+  context?: string
+}
