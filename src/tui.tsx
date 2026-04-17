@@ -2,7 +2,7 @@
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createEffect, createMemo, createSignal, onCleanup, Show, For } from "solid-js";
 import { SyntaxStyle, type TextareaRenderable } from "@opentui/core";
-import { readFileSync, existsSync, writeFileSync } from "fs";
+import { appendFileSync, readFileSync, existsSync, writeFileSync } from "fs";
 import { homedir, platform } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
@@ -71,6 +71,13 @@ type TuiConfig = {
   keybinds?: Partial<TuiKeybinds>;
 };
 
+function writeTuiDebug(message: string, data?: Record<string, unknown>) {
+  try {
+    const line = `${new Date().toISOString()} DEBUG [OpenCodeForge:TUI] ${message}${data ? ` ${JSON.stringify(data)}` : ""}\n`;
+    appendFileSync(join(resolveDataDir(), "logs", "forge.log"), line, "utf-8");
+  } catch {}
+}
+
 function loadTuiConfig(): TuiConfig | undefined {
   try {
     const defaultBase = join(homedir(), platform() === "win32" ? "AppData" : ".config");
@@ -82,7 +89,9 @@ function loadTuiConfig(): TuiConfig | undefined {
         ? join(configRoot, "memory-config.jsonc")
         : join(configRoot, "graph-config.jsonc");
     const raw = readFileSync(configPath, "utf-8");
-    const stripped = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    let stripped = raw.replace(/\/\*[\s\S]*?\*\//g, "");
+    stripped = stripped.replace(/(^|[^:])\/\/.*$/gm, "$1");
+    stripped = stripped.replace(/,(\s*[}\]])/g, "$1");
     const parsed = JSON.parse(stripped);
     return parsed?.tui;
   } catch {
@@ -1168,6 +1177,12 @@ function LoopDetailsDialog(props: {
 }
 
 function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: string }) {
+  writeTuiDebug("sidebar mount", {
+    directory: props.api.state.path.directory,
+    sessionId: props.sessionId,
+    sidebar: props.opts.sidebar,
+    showLoops: props.opts.showLoops,
+  });
   const [open, setOpen] = createSignal(true);
   const [loops, setLoops] = createSignal<LoopInfo[]>([]);
   const [hasPlan, setHasPlan] = createSignal(false);
@@ -1418,8 +1433,6 @@ const tui: TuiPlugin = async (api) => {
     keybinds: { ...DEFAULT_KEYBINDS, ...tuiConfig?.keybinds },
   };
 
-  if (!opts.sidebar) return;
-
   api.command.register(() => {
     const directory = api.state.path.directory;
     const pid = resolveProjectId(directory);
@@ -1435,6 +1448,7 @@ const tui: TuiPlugin = async (api) => {
         description: `${states.length} loop${states.length !== 1 ? "s" : ""}`,
         category: "Forge",
         keybind: opts.keybinds.showLoops,
+        slash: { name: "forge-loops" },
         onSelect: () => {
           const worktreeLoops = states.filter((l) => l.worktree);
           const loopOptions = worktreeLoops.map((l) => {
@@ -1505,6 +1519,7 @@ const tui: TuiPlugin = async (api) => {
         description: "View cached plan for this session",
         category: "Forge",
         keybind: opts.keybinds.viewPlan,
+        slash: { name: "forge-view-plan" },
         onSelect: () => {
           const freshPlan = readPlan(pid, sessionID);
           if (!freshPlan) {
@@ -1533,6 +1548,7 @@ const tui: TuiPlugin = async (api) => {
         description: "Execute cached plan",
         category: "Forge",
         keybind: opts.keybinds.executePlan,
+        slash: { name: "forge-execute-plan" },
         onSelect: () => {
           const freshPlan = readPlan(pid, sessionID);
           if (!freshPlan) {
@@ -1559,14 +1575,33 @@ const tui: TuiPlugin = async (api) => {
     ];
   });
 
-  api.slots.register({
-    order: 150,
-    slots: {
-      sidebar_content(_ctx, slotProps) {
-        return <Sidebar api={api} opts={opts} sessionId={slotProps.session_id} />;
-      },
-    },
+  if (!opts.sidebar) return;
+
+  writeTuiDebug("registering sidebar slot", {
+    directory: api.state.path.directory,
+    hasSlotsApi: !!api.slots,
+    hasRegister: typeof api.slots?.register === "function",
   });
+
+  try {
+    api.slots.register({
+      order: 150,
+      slots: {
+        sidebar_content(_ctx, slotProps) {
+          writeTuiDebug("sidebar slot render", {
+            directory: api.state.path.directory,
+            sessionId: slotProps.session_id,
+          });
+          return <Sidebar api={api} opts={opts} sessionId={slotProps.session_id} />;
+        },
+      },
+    });
+  } catch (error) {
+    writeTuiDebug("sidebar slot registration failed", {
+      directory: api.state.path.directory,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
 
 const plugin: TuiPluginModule & { id: string } = { id, tui };

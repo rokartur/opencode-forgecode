@@ -41,7 +41,13 @@ const tuiResult = await Bun.build({
   target: "node",
   format: "esm",
   plugins: [solidPlugin],
-  external: ["@opencode-ai/plugin/tui", "better-sqlite3"],
+  external: [
+    "@opencode-ai/plugin/tui",
+    "@opentui/core",
+    "@opentui/solid",
+    "solid-js",
+    "better-sqlite3",
+  ],
   define: {
     __FORGECODE_VERSION_VALUE__: JSON.stringify(buildVersion),
   },
