@@ -4,21 +4,24 @@ import { execSync } from 'child_process'
 import solidPlugin from '@opentui/solid/bun-plugin'
 
 const packageJsonPath = join(__dirname, '..', 'package.json')
-const versionPath = join(__dirname, '..', 'src', 'version.ts')
+const distVersionPath = join(__dirname, '..', 'dist', 'version.js')
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
 const version = packageJson.version as string
-
-const versionContent = `export const VERSION = '${version}'\n`
-writeFileSync(versionPath, versionContent, 'utf-8')
-
-console.log(`Version ${version} written to src/version.ts`)
 
 console.log('Compiling main code...')
 execSync('tsc -p tsconfig.build.json', {
   cwd: join(__dirname, '..'),
   stdio: 'inherit'
 })
+
+const distVersionContent = readFileSync(distVersionPath, 'utf-8').replace(
+  /const BUILD_VERSION = ['\"]__FORGECODE_VERSION_VALUE__['\"];/,
+  `const BUILD_VERSION = '${version}';`
+)
+writeFileSync(distVersionPath, distVersionContent, 'utf-8')
+
+console.log(`Version ${version} injected into dist/version.js`)
 
 console.log('Compiling TUI plugin...')
 const result = await Bun.build({
