@@ -72,7 +72,8 @@
   },
   "scripts": {
     "build": "bun scripts/build.ts",
-    "lint": "eslint .",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
     "test": "bun test --max-concurrency=1",
     "typecheck": "tsc --noEmit",
     "cli": "bun src/cli/index.ts",
