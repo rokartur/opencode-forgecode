@@ -20,6 +20,7 @@ import {
   GRAPH_SCAN_BATCH_SIZE,
 } from "./constants";
 import { isBarrelFile, kindTag, collectFilesAsync, extractSignature } from "./utils";
+import { withSqliteBusyRetry } from "./retry";
 import type {
   DbFile,
   DbSymbol,
@@ -77,37 +78,6 @@ interface RepoMapConfig {
   db: Database;
 }
 
-const SQLITE_BUSY_RETRY_DELAYS_MS = [10, 25, 50, 100, 250] as const;
-
-function isSqliteBusyError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-
-  const code = "code" in error ? error.code : undefined;
-  if (code === "SQLITE_BUSY") return true;
-
-  const message = "message" in error ? error.message : undefined;
-  if (typeof message !== "string") return false;
-
-  return message.includes("database is locked") || message.includes("SQLITE_BUSY");
-}
-
-async function withSqliteBusyRetry<T>(fn: () => T | Promise<T>): Promise<T> {
-  let attempt = 0;
-
-  while (true) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (!isSqliteBusyError(error) || attempt >= SQLITE_BUSY_RETRY_DELAYS_MS.length) {
-        throw error;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, SQLITE_BUSY_RETRY_DELAYS_MS[attempt]));
-      attempt += 1;
-    }
-  }
-}
-
 export class RepoMap {
   private db: Database;
   private cwd: string;
@@ -125,6 +95,21 @@ export class RepoMap {
     this.cache = new FileCache(200);
     this.treeSitter.setCache(this.cache);
     this.prepareStatements();
+  }
+
+  /**
+   * Execute `fn` inside a DB transaction, retrying on SQLITE_BUSY with
+   * bounded backoff. All write paths in this class must go through this
+   * helper so that rare lock contention with concurrent followers'
+   * readonly readers (or a cross-process checkpoint) doesn't surface as
+   * a user-visible error.
+   *
+   * Reads continue to go through plain `this.stmts.*.get/all()` — under
+   * WAL they never block and never get SQLITE_BUSY, so the retry
+   * machinery is pure overhead for them.
+   */
+  private txWrite<T>(fn: () => T): Promise<T> {
+    return withSqliteBusyRetry(() => this.db.transaction(fn)());
   }
 
   private prepareStatements(): void {
@@ -398,7 +383,7 @@ export class RepoMap {
     this.scanTotalFiles = this.scanFiles.length;
 
     // Reset derived state tables before fresh scan to avoid stale data
-    this.resetGraphDataForFullScan();
+    await this.resetGraphDataForFullScan();
 
     return {
       totalFiles: this.scanTotalFiles,
@@ -441,18 +426,18 @@ export class RepoMap {
     await this.resolveUnresolvedRefs();
     await this.buildEdges();
     await this.computePageRank();
-    this.linkTestFiles();
+    await this.linkTestFiles();
     await this.buildCallGraph();
     await this.buildCoChanges();
-    this.rescueOrphans();
+    await this.rescueOrphans();
   }
 
   /**
    * Reset graph data tables before a fresh full scan.
    * This ensures stale file entries and derived data from previous scans are removed.
    */
-  private resetGraphDataForFullScan(): void {
-    this.db.transaction(() => {
+  private async resetGraphDataForFullScan(): Promise<void> {
+    await this.txWrite(() => {
       this.db.run("DELETE FROM refs");
       this.db.run("DELETE FROM edges");
       this.db.run("DELETE FROM calls");
@@ -494,7 +479,7 @@ export class RepoMap {
       `);
       this.db.run("DELETE FROM symbols");
       this.db.run("DELETE FROM files");
-    })();
+    });
   }
 
   async indexFile(filePath: string): Promise<void> {
@@ -608,8 +593,8 @@ export class RepoMap {
       console.debug("Token extraction failed for file:", filePath, err);
     }
 
-    // All DB writes in a single transaction
-    const tx = this.db.transaction(() => {
+    // All DB writes in a single transaction (retries on SQLITE_BUSY).
+    await this.txWrite(() => {
       // Re-check inside the transaction to avoid races with concurrent
       // indexFile flows that may have inserted a row for the same path
       // between our pre-transaction read and here.
@@ -694,8 +679,6 @@ export class RepoMap {
         );
       }
     });
-
-    await withSqliteBusyRetry(() => tx());
   }
 
   private async resolveImportSource(
@@ -738,7 +721,7 @@ export class RepoMap {
       WHERE s.name = ? AND s.is_exported = 1
     `);
 
-    this.db.transaction(() => {
+    await this.txWrite(() => {
       for (const ref of unresolved) {
         const matches = findExported.all(ref.name) as Array<{
           id: number;
@@ -769,7 +752,7 @@ export class RepoMap {
           ]);
         }
       }
-    })();
+    });
   }
 
   async buildEdges(): Promise<void> {
@@ -788,14 +771,14 @@ export class RepoMap {
       }
     }
 
-    this.db.transaction(() => {
+    await this.txWrite(() => {
       for (const [key, data] of edgeMap) {
         const [source, target] = key.split("-").map(Number);
         const idf = Math.log(2);
         const dampenedWeight = data.weight * idf;
         this.stmts.insertEdge.run([source, target, dampenedWeight, data.confidence]);
       }
-    })();
+    });
   }
 
   async computePageRank(): Promise<void> {
@@ -846,12 +829,12 @@ export class RepoMap {
       }
     }
 
-    this.db.transaction(() => {
+    await this.txWrite(() => {
       for (const file of files) {
         const rank = ranks.get(file.id) || 0;
         this.db.run("UPDATE files SET pagerank = ? WHERE id = ?", [rank, file.id]);
       }
-    })();
+    });
   }
 
   async computePageRankSync(): Promise<void> {
@@ -1626,7 +1609,7 @@ export class RepoMap {
     `);
 
     const entries = [...pairCounts.entries()].filter(([, count]) => count >= 2);
-    const tx = this.db.transaction(() => {
+    await this.txWrite(() => {
       for (const [key, count] of entries) {
         const [a, b] = key.split("\0") as [string, string];
         const idA = pathToId.get(a);
@@ -1636,7 +1619,6 @@ export class RepoMap {
         }
       }
     });
-    tx();
   }
 
   async buildCallGraph(): Promise<void> {
@@ -1660,7 +1642,7 @@ export class RepoMap {
       } catch {}
     }
 
-    const tx = this.db.transaction(() => {
+    await this.txWrite(() => {
       for (const file of filesWithImports) {
         const lines = fileContents.get(file.id);
         if (!lines) continue;
@@ -1722,13 +1704,12 @@ export class RepoMap {
         }
       }
     });
-    tx();
   }
 
-  linkTestFiles(): void {
+  async linkTestFiles(): Promise<void> {
     const testFiles = this.stmts.getTestFiles.all() as Array<{ id: number; path: string }>;
 
-    this.db.transaction(() => {
+    await this.txWrite(() => {
       for (const testFile of testFiles) {
         const sourcePath = testFile.path
           .replace(/\.test\./, ".")
@@ -1740,10 +1721,10 @@ export class RepoMap {
           this.stmts.insertEdge.run([testFile.id, source.id, 1, 1]);
         }
       }
-    })();
+    });
   }
 
-  rescueOrphans(): void {
+  async rescueOrphans(): Promise<void> {
     const orphans = this.db
       .prepare(`
       SELECT f.id, f.path
@@ -1758,7 +1739,7 @@ export class RepoMap {
 
     const orphanIds = new Set(orphans.map((o) => o.id));
 
-    this.db.transaction(() => {
+    await this.txWrite(() => {
       for (const orphan of orphans) {
         let rescued = false;
 
@@ -1794,6 +1775,6 @@ export class RepoMap {
           }
         }
       }
-    })();
+    });
   }
 }

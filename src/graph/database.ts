@@ -70,7 +70,11 @@ export function openGraphDatabase(dbPath: string): Database {
   try {
     db = new Database(dbPath);
     db.run("PRAGMA journal_mode=WAL");
-    db.run("PRAGMA busy_timeout=5000");
+    // Phase 6 hardening: 30s busy_timeout absorbs leader checkpoint stalls
+    // and rare WAL contention from long-running transactions. Combined
+    // with the write-side retryOnBusy wrapper, this keeps occasional
+    // SQLITE_BUSY from surfacing to users under heavy concurrent writes.
+    db.run("PRAGMA busy_timeout=30000");
     db.run("PRAGMA synchronous=NORMAL");
     db.run("PRAGMA foreign_keys=ON");
 
@@ -148,12 +152,43 @@ export function openGraphDatabase(dbPath: string): Database {
 }
 
 /**
+ * Opens the graph database in read-only mode for follower processes
+ * (Phase 5 read-only fast path). Does NOT alter schema, does NOT run
+ * integrity checks, does NOT delete the file on failure — the leader is
+ * solely responsible for bootstrap and repair. If the file does not
+ * exist, throws (callers must ensure the leader is up first).
+ *
+ * Readonly connections can safely coexist with the leader's write handle
+ * under WAL mode: readers see a snapshot at the time they begin each
+ * transaction (prepare/run), and never block or get blocked by writes.
+ *
+ * `busy_timeout` is still set so that a rare lock-file checkpoint from
+ * the writer doesn't return SQLITE_BUSY instantly.
+ */
+export function openGraphDatabaseReadOnly(dbPath: string): Database {
+  if (!existsSync(dbPath)) {
+    throw new Error(`openGraphDatabaseReadOnly: database file does not exist: ${dbPath}`);
+  }
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    db.run("PRAGMA busy_timeout=5000");
+    // Defense in depth: ensure no accidental write slips through the
+    // readonly connection even if caller prepares a write statement.
+    db.run("PRAGMA query_only=ON");
+  } catch {
+    // Some bun:sqlite / better-sqlite3 versions treat query_only as
+    // unsupported on open — safe to ignore, readonly=true still blocks.
+  }
+  return db;
+}
+
+/**
  * Creates a fresh graph database and runs schema initialization.
  */
 function createFreshGraphDatabase(dbPath: string): Database {
   const freshDb = new Database(dbPath);
   freshDb.run("PRAGMA journal_mode=WAL");
-  freshDb.run("PRAGMA busy_timeout=5000");
+  freshDb.run("PRAGMA busy_timeout=30000");
   freshDb.run("PRAGMA synchronous=NORMAL");
   freshDb.run("PRAGMA foreign_keys=ON");
   createTables(freshDb);
