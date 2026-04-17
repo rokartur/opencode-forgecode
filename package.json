@@ -26,13 +26,11 @@
     "dist",
     "forge-config.jsonc",
     "scripts",
-    "README.md",
-    "src/command/template"
+    "README.md"
   ],
   "bin": {
     "oc-forgecode": "./dist/cli/index.js"
   },
-  "author": "",
   "description": "opencode-forgecode — forge loops, graph indexing, sandbox, plan storage, plus the forgecode harness (system prompts, summary-frame compaction, truncation, doom-loop, pending-todos, undo snapshots) and forge/sage/muse agents.",
   "keywords": [
     "opencode",
@@ -81,5 +79,17 @@
     "update:patch": "npm version patch && git push origin && git push origin --tags",
     "update:minor": "npm version minor && git push origin && git push origin --tags",
     "prepack": "npm run build"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rokartur/opencode-forgecode"
+  },
+  "homepage": "https://github.com/rokartur/opencode-forgecode#readme",
+  "bugs": {
+    "url": "https://github.com/rokartur/opencode-forgecode/issues"
+  },
+  "author": "rokartur"
 }
