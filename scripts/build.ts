@@ -59,6 +59,12 @@ const workerResult = await Bun.build({
   outdir: join(distDir, "graph"),
   target: "node",
   format: "esm",
+  // web-tree-sitter ships emscripten glue with WASI imports (clock_time_get, etc.).
+  // Bundling it through Bun mangles the dynamic require/locateFile machinery and
+  // strips the WASI shim, producing:
+  //   LinkError: import function wasi_snapshot_preview1:clock_time_get must be callable
+  // Keep it external so Node loads the package's runtime as-is.
+  external: ["web-tree-sitter", "tree-sitter-wasms", "better-sqlite3"],
 });
 
 for (const result of [serverResult, tuiResult, workerResult]) {
