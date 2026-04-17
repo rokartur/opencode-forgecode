@@ -1,9 +1,16 @@
 import { GraphClient } from "./client";
-import { ensureGraphDirectory, readGraphCacheMetadata, writeGraphCacheMetadata } from "./database";
+import { ensureGraphDirectory, readGraphCacheMetadata, writeGraphCacheMetadata, openGraphDatabaseReadOnly } from "./database";
 import { join, relative, dirname, isAbsolute } from "path";
 import { watch, existsSync } from "fs";
 import type { Logger } from "../types";
 import { collectIndexFingerprint } from "./utils";
+import { acquireLeader, type LeaderHandle } from "./leader-lock";
+import { graphSocketPath } from "./socket-path";
+import { SocketTransport } from "./ipc-transport";
+import { RpcServer } from "./rpc";
+import { startIpcServer, type IpcServer } from "./ipc-server";
+import { RepoMap } from "./repo-map";
+import type { Database } from "../runtime/sqlite";
 import type {
   GraphStats,
   TopFileResult,
@@ -30,6 +37,12 @@ import type { GraphState, GraphStatsPayload } from "../utils/graph-status-store"
 export interface GraphService {
   /** Whether the graph service is fully initialized and ready to respond to queries. */
   readonly ready: boolean;
+  /**
+   * Role of this service in the leader/follower topology. `null` until
+   * `initialize()` has run. Leader owns the worker + watcher + SQLite
+   * write handle; follower forwards all RPCs over IPC to the leader.
+   */
+  readonly mode: "leader" | "follower" | null;
   /**
    * Performs a full scan of the codebase, indexing all files and building the graph.
    * Emits progress status updates during indexing.
@@ -197,7 +210,55 @@ interface PendingChange {
   timestamp: number;
 }
 
-const DEFAULT_DEBOUNCE_MS = 500;
+// Phase 6: 200 ms debounce coalesces bursts of writes from editors (save →
+// format → prettier) into a single flush, reducing leader contention.
+const DEFAULT_DEBOUNCE_MS = 200;
+
+/**
+ * Build a read-only dispatcher that maps RPC method names to local
+ * RepoMap calls. Only read methods are mapped; unknown / write methods
+ * throw so GraphClient transparently falls back to the IPC path (which
+ * routes to the leader's worker, the authoritative handle).
+ */
+function makeReadOnlyDispatcher(
+  repoMap: RepoMap,
+): (method: string, args: unknown[]) => Promise<unknown> {
+  type Handler = (args: unknown[]) => unknown;
+  const handlers: Record<string, Handler> = {
+    getStats: () => repoMap.getStats(),
+    getTopFiles: (a) => repoMap.getTopFiles((a[0] as number) ?? 20),
+    getFileDependents: (a) => repoMap.getFileDependents((a[0] as string) ?? ""),
+    getFileDependencies: (a) => repoMap.getFileDependencies((a[0] as string) ?? ""),
+    getFileCoChanges: (a) => repoMap.getFileCoChanges((a[0] as string) ?? ""),
+    getFileBlastRadius: (a) => repoMap.getFileBlastRadius((a[0] as string) ?? ""),
+    getFileSymbols: (a) => repoMap.getFileSymbols((a[0] as string) ?? ""),
+    findSymbols: (a) => repoMap.findSymbols((a[0] as string) ?? "", (a[1] as number) ?? 50),
+    searchSymbolsFts: (a) =>
+      repoMap.searchSymbolsFts((a[0] as string) ?? "", (a[1] as number) ?? 50),
+    getSymbolSignature: (a) =>
+      repoMap.getSymbolSignature((a[0] as string) ?? "", (a[1] as number) ?? 0),
+    getCallers: (a) => repoMap.getCallers((a[0] as string) ?? "", (a[1] as number) ?? 0),
+    getCallees: (a) => repoMap.getCallees((a[0] as string) ?? "", (a[1] as number) ?? 0),
+    getUnusedExports: (a) => repoMap.getUnusedExports((a[0] as number) ?? 50),
+    getDuplicateStructures: (a) => repoMap.getDuplicateStructures((a[0] as number) ?? 20),
+    getNearDuplicates: (a) =>
+      repoMap.getNearDuplicates((a[0] as number) ?? 0.8, (a[1] as number) ?? 50),
+    getExternalPackages: (a) => repoMap.getExternalPackages((a[0] as number) ?? 50),
+    getOrphanFiles: (a) => repoMap.getOrphanFiles((a[0] as number) ?? 50),
+    getCircularDependencies: (a) => repoMap.getCircularDependencies((a[0] as number) ?? 20),
+    getChangeImpact: (a) =>
+      repoMap.getChangeImpact((a[0] as string[]) ?? [], (a[1] as number) ?? 5),
+    getSymbolReferences: (a) =>
+      repoMap.getSymbolReferences((a[0] as string) ?? "", (a[1] as number) ?? 50),
+    render: (a) =>
+      repoMap.render(a[0] as { maxFiles?: number; maxSymbols?: number } | undefined),
+  };
+  return async (method, args) => {
+    const h = handlers[method];
+    if (!h) throw new Error(`read-only dispatcher: unsupported method '${method}'`);
+    return h(args);
+  };
+}
 
 /** Minimum number of files required to consider the graph for health check */
 const MIN_FILES_FOR_HEALTH_CHECK = 50;
@@ -344,6 +405,86 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
   let isFlushing = false;
   let watcherInitialized = false;
   let scanInFlight: Promise<void> | null = null;
+  let leaderHandle: LeaderHandle | null = null;
+  let ipcServer: IpcServer | null = null;
+  let role: "leader" | "follower" | null = null;
+  let graphDir: string | null = null;
+  let socketPath: string | null = null;
+  let ownershipTimer: ReturnType<typeof setInterval> | null = null;
+  let abdicated = false;
+  // Phase 5: follower-local read-only state. Opened once when we become a
+  // follower, closed on promotion, abdication, or service close.
+  let readOnlyDb: Database | null = null;
+  let readOnlyRepoMap: RepoMap | null = null;
+
+  const OWNERSHIP_CHECK_MS = 5_000;
+  const FAILOVER_BACKOFF_START_MS = 100;
+  const FAILOVER_BACKOFF_MAX_MS = 5_000;
+  const FAILOVER_MAX_ATTEMPTS = 20;
+
+  // Phase 7: follower connect retry. In stampede scenarios (N sessions
+  // starting simultaneously) the leader may still be binding its UDS
+  // socket when a follower tries to connect. ENOENT / ECONNREFUSED are
+  // transient during this window. 2 s total budget is enough for ~200
+  // attempts at 10 ms each to cover the worst observed bind delay on
+  // macOS + Linux without dragging out tests or startup.
+  const FOLLOWER_CONNECT_TIMEOUT_MS = 2_000;
+
+  async function connectWithRetry(leaderSocketPath: string): Promise<SocketTransport> {
+    const deadline = Date.now() + FOLLOWER_CONNECT_TIMEOUT_MS;
+    let attempt = 0;
+    let lastErr: unknown;
+    while (Date.now() < deadline) {
+      attempt += 1;
+
+      // Pre-flight: wait for the socket file to exist before asking Node
+      // to connect. Some platforms (macOS/Bun) surface ENOENT synchronously
+      // via the socket's error event in a way that escapes the Promise
+      // executor's catch, so we avoid the call entirely when we know the
+      // leader hasn't bound yet. Also prevents log spam.
+      if (!existsSync(leaderSocketPath)) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        const wait = Math.min(10 + attempt * 5, 100, remaining);
+        await new Promise((r) => setTimeout(r, wait));
+        lastErr = Object.assign(
+          new Error(`leader socket not bound yet: ${leaderSocketPath}`),
+          { code: "ENOENT" },
+        );
+        continue;
+      }
+
+      // Each attempt needs a fresh SocketTransport: once connect() fails
+      // internally the transport flips its handshake flag and can't be
+      // reused safely.
+      const transport = new SocketTransport({
+        socketPath: leaderSocketPath,
+        logger: { error: (m, e) => logger.error(m, e), debug: (m) => logger.debug(m) },
+      });
+      try {
+        await transport.connect();
+        return transport;
+      } catch (err) {
+        lastErr = err;
+        const code = (err as { code?: string } | null)?.code;
+        const transient =
+          code === "ENOENT" || code === "ECONNREFUSED" || code === "EAGAIN";
+        if (!transient) throw err;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        const wait = Math.min(10 + attempt * 5, 100, remaining);
+        logger.debug(
+          `Graph follower: leader socket ${leaderSocketPath} not ready (${code}), retry ${attempt}`,
+        );
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error(
+          `Graph follower: failed to connect to leader at ${leaderSocketPath} within ${FOLLOWER_CONNECT_TIMEOUT_MS}ms`,
+        );
+  }
 
   const effectiveDebounceMs = debounceMs ?? DEFAULT_DEBOUNCE_MS;
 
@@ -527,6 +668,10 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
       return initialized && !closing && workerHealthy && client.isReady();
     },
 
+    get mode(): "leader" | "follower" | null {
+      return role;
+    },
+
     async scan(): Promise<void> {
       // If a scan is already in flight, return the same promise (serialize concurrent requests)
       if (scanInFlight) {
@@ -617,6 +762,12 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
       // Mark as closing to prevent new work from being queued
       closing = true;
 
+      // Stop ownership watchdog first so abdication doesn't race with close
+      stopOwnershipWatchdog();
+
+      // Close follower read-only fast path before tearing down the client.
+      closeReadOnlyFastPath();
+
       // Clear flush timer immediately
       if (flushTimer) {
         clearTimeout(flushTimer);
@@ -629,8 +780,32 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
       // Stop watcher before more paths can be enqueued
       stopWatcher();
 
-      // Close client (and its worker) — worker owns the DB handle
+      // Close IPC server (leader only) before releasing the lock so late
+      // followers don't race onto a dead socket.
+      if (ipcServer) {
+        try {
+          await ipcServer.close();
+        } catch (err) {
+          logger.error("Graph service: ipc server close failed", err);
+        }
+        ipcServer = null;
+      }
+
+      // Close client (and its worker in leader mode) — worker owns the DB handle
       await client.close();
+
+      // Release the leader lock LAST so a waiting follower can safely
+      // re-acquire without colliding with a live worker.
+      if (leaderHandle) {
+        try {
+          leaderHandle.release();
+        } catch (err) {
+          logger.error("Graph service: leader release failed", err);
+        }
+        leaderHandle = null;
+      }
+
+      role = null;
       initialized = false;
       workerHealthy = false;
     },
@@ -849,33 +1024,48 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
 
       // Ensure graph directory exists; worker thread is the sole DB owner
       dbPath = ensureGraphDirectory(projectId, dataDir, cwd);
+      graphDir = dirname(dbPath);
+      socketPath = graphSocketPath(graphDir);
 
-      // Create worker with explicit path resolution
-      const workerPath = resolveWorkerPath();
-      logger.debug(`Graph worker path: ${workerPath}`);
+      // Leader election: atomic lockfile decides who owns the worker.
+      const acquired = acquireLeader(graphDir, { socketPath });
+      role = acquired.role;
 
-      const worker = new globalThis.Worker(workerPath, {
-        env: {
-          GRAPH_DB_PATH: dbPath,
-          GRAPH_CWD: cwd,
-        },
-      });
+      if (acquired.role === "leader") {
+        leaderHandle = acquired;
+        await setupLeader();
+      } else {
+        await setupFollower(acquired.info.socketPath, acquired.info.pid);
+      }
 
-      client.setWorker(worker, logger);
-      await client.initialize({ cwd, dbPath, logger });
+      // Install failover hook (read-only calls retry once, writes surface
+      // LeaderLostError). The provider handles both follower → new leader
+      // reconnect and follower → leader promotion.
+      client.setFailoverProvider(runFailover);
 
       initialized = true;
       workerHealthy = true;
-      logger.log("Graph service initialized");
-      logger.debug("Graph worker ready");
-
-      // Start watcher after successful initialization
-      if (watchEnabled) {
-        startWatcher();
-      }
     } catch (error) {
       initialized = false;
       workerHealthy = false;
+      // Best-effort cleanup of partial state.
+      if (ipcServer) {
+        try {
+          await ipcServer.close();
+        } catch {
+          /* ignore */
+        }
+        ipcServer = null;
+      }
+      if (leaderHandle) {
+        try {
+          leaderHandle.release();
+        } catch {
+          /* ignore */
+        }
+        leaderHandle = null;
+      }
+      role = null;
       const msg = error instanceof Error ? error.message : String(error);
       logger.error("Failed to initialize graph service", error);
       emitStatus("error", undefined, msg);
@@ -883,6 +1073,250 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
       err.cause = error;
       throw err;
     }
+  }
+
+  async function setupLeader(): Promise<void> {
+    if (!dbPath || !socketPath) throw new Error("setupLeader: dbPath/socketPath not set");
+
+    // Create worker with explicit path resolution (leader owns the DB).
+    const workerPath = resolveWorkerPath();
+    logger.debug(`Graph worker path: ${workerPath}`);
+
+    const worker = new globalThis.Worker(workerPath, {
+      env: {
+        GRAPH_DB_PATH: dbPath,
+        GRAPH_CWD: cwd,
+      },
+    });
+
+    // Install worker on client. For fresh initialize() this is setWorker;
+    // for promotion during failover we use promoteToLeader (which keeps
+    // failover hook attached).
+    if (client.getMode() === null) {
+      client.setWorker(worker, logger);
+    } else {
+      client.promoteToLeader(worker, logger);
+    }
+    await client.initialize({ cwd, dbPath, logger });
+
+    // Bring up the IPC server so followers can reach us. The server uses
+    // a forwarding RpcServer: every follower RPC is proxied into the
+    // local worker via GraphClient.forward(), which multiplexes callIds.
+    const proxyServer = new RpcServer();
+    (proxyServer as unknown as {
+      handle: (message: unknown, postResponse: (response: unknown) => void) => Promise<void>;
+    }).handle = async (message, postResponse) => {
+      if (!message || typeof message !== "object") return;
+      const msg = message as { callId: number; method: string; args: unknown[] };
+      try {
+        const result = await client.forward(msg.method, msg.args);
+        postResponse({ callId: msg.callId, result });
+      } catch (err) {
+        postResponse({
+          callId: msg.callId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    ipcServer = await startIpcServer({
+      socketPath,
+      rpcServer: proxyServer,
+      logger: { error: (m, e) => logger.error(m, e), debug: (m) => logger.debug(m) },
+    });
+
+    // Start watcher after successful initialization (leader only —
+    // followers must not double-watch, leader fans changes out via RPC).
+    if (watchEnabled) {
+      startWatcher();
+    }
+
+    // Start split-brain watchdog: if we lose lockfile ownership (e.g. our
+    // lockfile gets replaced because it was considered stale), we abdicate
+    // immediately so we don't keep writing to a DB we no longer own.
+    startOwnershipWatchdog();
+
+    role = "leader";
+    workerHealthy = true;
+    logger.log(`Graph service: leader ready (pid=${process.pid}, socket=${socketPath})`);
+  }
+
+  async function setupFollower(leaderSocketPath: string, leaderPid: number): Promise<void> {
+    // Follower mode: connect to the leader. No worker, no watcher,
+    // no DB write handle in this process.
+    //
+    // Phase 7: connect with retry. In concurrent clean-start scenarios
+    // (10 sessions opening at once) the follower can race ahead of the
+    // leader's IPC server. ENOENT / ECONNREFUSED are expected for a few
+    // ms while the leader is binding the socket, so we back off and
+    // retry instead of failing initialization.
+    const transport = await connectWithRetry(leaderSocketPath);
+    client.setTransport(transport, logger, "follower");
+    await client.initialize({ cwd, dbPath: dbPath ?? "", logger });
+
+    // Phase 5 fast path: open a local read-only SQLite handle. WAL mode
+    // lets us read concurrently with the leader's writer without locks.
+    // If this fails for any reason, log and continue — the follower will
+    // just serve every read over IPC instead, which is still correct.
+    openReadOnlyFastPath();
+
+    role = "follower";
+    workerHealthy = true;
+    logger.log(
+      `Graph service: follower connected (leader pid=${leaderPid}, socket=${leaderSocketPath})`,
+    );
+  }
+
+  /**
+   * Opens the local read-only SQLite handle and installs a dispatcher on
+   * GraphClient so read-only RPC methods short-circuit to local SELECTs
+   * instead of going over IPC. The leader's WAL writes are visible on
+   * each new statement thanks to WAL's read snapshot isolation.
+   */
+  function openReadOnlyFastPath(): void {
+    if (!dbPath) return;
+    closeReadOnlyFastPath();
+    try {
+      readOnlyDb = openGraphDatabaseReadOnly(dbPath);
+      readOnlyRepoMap = new RepoMap({ cwd, db: readOnlyDb });
+      const dispatcher = makeReadOnlyDispatcher(readOnlyRepoMap);
+      client.setReadOnlyDispatcher(dispatcher);
+      logger.debug("Graph follower: read-only fast path active");
+    } catch (err) {
+      logger.debug(
+        `Graph follower: read-only fast path unavailable, falling back to IPC: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      closeReadOnlyFastPath();
+    }
+  }
+
+  function closeReadOnlyFastPath(): void {
+    client.clearReadOnlyDispatcher();
+    readOnlyRepoMap = null;
+    if (readOnlyDb) {
+      try {
+        readOnlyDb.close();
+      } catch {
+        /* ignore */
+      }
+      readOnlyDb = null;
+    }
+  }
+
+  function startOwnershipWatchdog(): void {
+    if (ownershipTimer) clearInterval(ownershipTimer);
+    ownershipTimer = setInterval(() => {
+      if (closing || !leaderHandle) return;
+      try {
+        if (!leaderHandle.validateOwnership()) {
+          logger.error(
+            "Graph leader lost lockfile ownership — abdicating to avoid split-brain",
+          );
+          abdicate().catch((err) => logger.error("Graph leader abdication failed", err));
+        }
+      } catch (err) {
+        logger.error("Graph ownership watchdog error", err);
+      }
+    }, OWNERSHIP_CHECK_MS);
+    if (typeof ownershipTimer.unref === "function") {
+      ownershipTimer.unref();
+    }
+  }
+
+  function stopOwnershipWatchdog(): void {
+    if (ownershipTimer) {
+      clearInterval(ownershipTimer);
+      ownershipTimer = null;
+    }
+  }
+
+  /**
+   * Called when the leader detects it lost lockfile ownership (split-brain
+   * recovery). Tears down leader infrastructure so write RPCs surface
+   * LeaderLostError. Does NOT re-acquire — a parent agent decides whether
+   * to restart the service.
+   */
+  async function abdicate(): Promise<void> {
+    if (abdicated) return;
+    abdicated = true;
+    stopOwnershipWatchdog();
+    stopWatcher();
+    closeReadOnlyFastPath();
+    if (ipcServer) {
+      try { await ipcServer.close(); } catch { /* ignore */ }
+      ipcServer = null;
+    }
+    try { await client.close(); } catch { /* ignore */ }
+    // NOTE: do NOT release leaderHandle — we already lost ownership.
+    leaderHandle = null;
+    workerHealthy = false;
+    role = null;
+    initialized = false;
+    emitStatus("error", undefined, "Graph leader lost lockfile ownership");
+  }
+
+  /**
+   * Failover provider wired into GraphClient. Called when an RPC fails
+   * with a transport error. Walks an exponential-backoff loop trying to
+   * reconnect to a leader; on each attempt:
+   *   - acquireLeader() decides whether we take over or another process
+   *     already has the lock;
+   *   - if we win: promote this process to leader (spin up worker, IPC
+   *     server, watcher);
+   *   - if we lose: reconnect follower SocketTransport to the new leader.
+   */
+  async function runFailover(): Promise<void> {
+    if (closing) throw new Error("graph service closing");
+    if (!graphDir || !socketPath) throw new Error("service not initialized");
+    let delay = FAILOVER_BACKOFF_START_MS;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < FAILOVER_MAX_ATTEMPTS; attempt++) {
+      if (closing) throw new Error("graph service closing");
+      try {
+        const acquired = acquireLeader(graphDir, { socketPath });
+        if (acquired.role === "leader") {
+          // Promotion: we won the lock. Close the read-only handle before
+          // we start the worker — the worker will open the DB read/write,
+          // and keeping an extra RO fd around on Windows would block it.
+          closeReadOnlyFastPath();
+          logger.log(
+            `Graph failover: promoted to leader (attempt ${attempt + 1}, pid=${process.pid})`,
+          );
+          leaderHandle = acquired;
+          await setupLeader();
+          return;
+        }
+        // Still follower — reconnect to the (possibly new) leader.
+        const transport = await connectWithRetry(acquired.info.socketPath);
+        client.setTransport(transport, logger, "follower");
+        // Re-open the RO fast path against the (possibly new) leader's DB.
+        // The DB path itself is stable for a (projectId, cwd) scope.
+        openReadOnlyFastPath();
+        role = "follower";
+        workerHealthy = true;
+        logger.log(
+          `Graph failover: reconnected as follower (attempt ${attempt + 1}, leader pid=${acquired.info.pid})`,
+        );
+        return;
+      } catch (err) {
+        lastError = err;
+        logger.debug(
+          `Graph failover attempt ${attempt + 1} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        await sleep(delay);
+        delay = Math.min(delay * 2, FAILOVER_BACKOFF_MAX_MS);
+      }
+    }
+    throw new Error(
+      `graph failover exhausted after ${FAILOVER_MAX_ATTEMPTS} attempts: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`,
+    );
+  }
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   return service;
