@@ -22,7 +22,7 @@ declare module 'bun:worker' {
 
 declare module 'bun:sqlite' {
   export class Database {
-    constructor(path: string, options?: { create?: boolean; readonly?: boolean })
+    constructor(path: string, options?: { create?: boolean; readonly?: boolean; readwrite?: boolean })
     run(sql: string, ...params: unknown[]): void
     prepare(sql: string): Statement
     close(): void

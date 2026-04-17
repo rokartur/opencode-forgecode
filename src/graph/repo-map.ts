@@ -77,6 +77,37 @@ interface RepoMapConfig {
   db: Database;
 }
 
+const SQLITE_BUSY_RETRY_DELAYS_MS = [10, 25, 50, 100, 250] as const;
+
+function isSqliteBusyError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const code = "code" in error ? error.code : undefined;
+  if (code === "SQLITE_BUSY") return true;
+
+  const message = "message" in error ? error.message : undefined;
+  if (typeof message !== "string") return false;
+
+  return message.includes("database is locked") || message.includes("SQLITE_BUSY");
+}
+
+async function withSqliteBusyRetry<T>(fn: () => T | Promise<T>): Promise<T> {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isSqliteBusyError(error) || attempt >= SQLITE_BUSY_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, SQLITE_BUSY_RETRY_DELAYS_MS[attempt]));
+      attempt += 1;
+    }
+  }
+}
+
 export class RepoMap {
   private db: Database;
   private cwd: string;
@@ -578,7 +609,7 @@ export class RepoMap {
     }
 
     // All DB writes in a single transaction
-    this.db.transaction(() => {
+    const tx = this.db.transaction(() => {
       // Re-check inside the transaction to avoid races with concurrent
       // indexFile flows that may have inserted a row for the same path
       // between our pre-transaction read and here.
@@ -662,7 +693,9 @@ export class RepoMap {
           [frag.hash, fileId, "", 1, frag.tokenOffset],
         );
       }
-    })();
+    });
+
+    await withSqliteBusyRetry(() => tx());
   }
 
   private async resolveImportSource(

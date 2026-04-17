@@ -44,12 +44,12 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@opencode-ai/plugin": "^1.4.7",
-    "@opencode-ai/sdk": "^1.4.7",
+    "@opencode-ai/plugin": "^1.4.10",
+    "@opencode-ai/sdk": "^1.4.10",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.9.0",
     "tree-sitter-wasms": "0.1.13",
-    "web-tree-sitter": "0.25.10"
+    "web-tree-sitter": "0.26.8"
   },
   "peerDependencies": {
     "@opentui/core": ">=0.1.92",

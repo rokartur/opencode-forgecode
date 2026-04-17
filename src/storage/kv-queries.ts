@@ -1,5 +1,7 @@
 import type { Database } from "../runtime/sqlite";
 
+const SQLITE_BUSY_RETRY_DELAYS_MS = [10, 25, 50, 100, 250] as const;
+
 export interface KvRow {
   projectId: string;
   key: string;
@@ -31,6 +33,39 @@ function mapRow(row: KvRowRaw): KvRow {
 
 const CLEANUP_INTERVAL_MS = 300_000;
 let lastCleanupAt = 0;
+
+function isSqliteBusyError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const code = "code" in error ? error.code : undefined;
+  if (code === "SQLITE_BUSY") return true;
+
+  const message = "message" in error ? error.message : undefined;
+  if (typeof message !== "string") return false;
+
+  return message.includes("database is locked") || message.includes("SQLITE_BUSY");
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withSqliteBusyRetry<T>(fn: () => T): T {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return fn();
+    } catch (error) {
+      if (!isSqliteBusyError(error) || attempt >= SQLITE_BUSY_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+
+      sleepSync(SQLITE_BUSY_RETRY_DELAYS_MS[attempt]);
+      attempt += 1;
+    }
+  }
+}
 
 export function createKvQuery(db: Database) {
   const getStmt = db.prepare(
@@ -74,13 +109,13 @@ export function createKvQuery(db: Database) {
 
     set(projectId: string, key: string, data: string, expiresAt: number): void {
       const now = Date.now();
-      setStmt.run(projectId, key, data, expiresAt, now, now);
+      withSqliteBusyRetry(() => setStmt.run(projectId, key, data, expiresAt, now, now));
 
       if (now - lastCleanupAt > CLEANUP_INTERVAL_MS) {
         lastCleanupAt = now;
         setImmediate(() => {
           try {
-            deleteExpiredStmt.run(now);
+            withSqliteBusyRetry(() => deleteExpiredStmt.run(now));
           } catch {
             // Ignore errors from cleanup (e.g., if db is closed)
           }
@@ -89,7 +124,7 @@ export function createKvQuery(db: Database) {
     },
 
     delete(projectId: string, key: string): void {
-      deleteStmt.run(projectId, key);
+      withSqliteBusyRetry(() => deleteStmt.run(projectId, key));
     },
 
     list(projectId: string): KvRow[] {
@@ -103,7 +138,7 @@ export function createKvQuery(db: Database) {
     },
 
     deleteExpired(): number {
-      const result = deleteExpiredStmt.run(Date.now());
+      const result = withSqliteBusyRetry(() => deleteExpiredStmt.run(Date.now()));
       return result.changes;
     },
   };
