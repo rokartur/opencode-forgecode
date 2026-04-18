@@ -341,6 +341,12 @@ export interface ScanBatchResult {
 	completed: boolean
 	nextOffset: number
 	totalFiles: number
+	/** Wall-clock time spent processing this batch, in ms. Used by the service
+	 * layer to adapt the batch size for subsequent calls. */
+	elapsedMs?: number
+	/** Files skipped in this batch because indexing exceeded the per-file
+	 * timeout. Aggregated across the whole scan by the service layer. */
+	skippedTimeouts?: number
 }
 
 /** Orphan file result — files with no incoming edges (nobody imports them) */

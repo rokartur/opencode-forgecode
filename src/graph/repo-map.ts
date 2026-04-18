@@ -8,7 +8,13 @@ import { existsSync, statSync } from 'fs'
 import { TreeSitterBackend } from './tree-sitter'
 import { FileCache } from './cache'
 import { tokenize, computeMinHash, computeFragmentHashes, jaccardSimilarity } from './clone-detection'
-import { INDEXABLE_EXTENSIONS, PAGERANK_ITERATIONS, PAGERANK_DAMPING, GRAPH_SCAN_BATCH_SIZE } from './constants'
+import {
+	INDEXABLE_EXTENSIONS,
+	PAGERANK_ITERATIONS,
+	PAGERANK_DAMPING,
+	GRAPH_SCAN_BATCH_SIZE,
+	GRAPH_SCAN_PER_FILE_TIMEOUT_MS,
+} from './constants'
 import { isBarrelFile, kindTag, collectFilesAsync, extractSignature } from './utils'
 import { withSqliteBusyRetry } from './retry'
 import type {
@@ -372,16 +378,29 @@ export class RepoMap {
 	/**
 	 * Scan a batch of files starting at the given offset.
 	 * Returns progress info including whether scanning is complete.
+	 *
+	 * Each file is guarded by a per-file timeout so one pathological file
+	 * (e.g. very large, tree-sitter bug, syscall stall) cannot starve the
+	 * whole batch. Timed-out files are counted in `skippedTimeouts` and the
+	 * scan continues.
 	 */
 	async scanBatch(offset: number, batchSize: number): Promise<ScanBatchResult> {
 		const filesToProcess = this.scanFiles.slice(offset, offset + batchSize)
 		const processedCount = filesToProcess.length
+		const startedAt = Date.now()
+		let skippedTimeouts = 0
 
 		for (const filePath of filesToProcess) {
 			try {
-				await this.indexFile(filePath)
+				await this.indexFileWithTimeout(filePath, GRAPH_SCAN_PER_FILE_TIMEOUT_MS)
 			} catch (err) {
-				console.error(`Error indexing ${filePath}:`, err)
+				const msg = err instanceof Error ? err.message : String(err)
+				if (msg.startsWith('__indexFileTimeout__')) {
+					skippedTimeouts++
+					console.error(`Skipping ${filePath}: indexing exceeded ${GRAPH_SCAN_PER_FILE_TIMEOUT_MS}ms`)
+				} else {
+					console.error(`Error indexing ${filePath}:`, err)
+				}
 			}
 		}
 
@@ -393,6 +412,31 @@ export class RepoMap {
 			completed,
 			nextOffset,
 			totalFiles: this.scanTotalFiles,
+			elapsedMs: Date.now() - startedAt,
+			skippedTimeouts,
+		}
+	}
+
+	/**
+	 * Race indexFile() against a wall-clock timeout. On timeout the indexing
+	 * promise is orphaned (tree-sitter parsing is CPU-bound and not
+	 * cancellable); the scan proceeds with the next file. The orphan's
+	 * eventual settle is swallowed to avoid unhandled rejections.
+	 */
+	private async indexFileWithTimeout(filePath: string, timeoutMs: number): Promise<void> {
+		let timer: ReturnType<typeof setTimeout> | null = null
+		const indexingPromise = this.indexFile(filePath)
+		// Keep errors from rejecting the process after the race is resolved.
+		indexingPromise.catch(() => {})
+		try {
+			await Promise.race([
+				indexingPromise,
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(() => reject(new Error(`__indexFileTimeout__:${filePath}`)), timeoutMs)
+				}),
+			])
+		} finally {
+			if (timer) clearTimeout(timer)
 		}
 	}
 

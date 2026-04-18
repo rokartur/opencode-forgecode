@@ -1,4 +1,4 @@
-import { RpcClient } from './rpc'
+import { RpcClient, RPC_SCAN_TIMEOUT_MS } from './rpc'
 import type { RpcTransport } from './ipc-transport'
 import { isReadOnlyMethod } from './read-only-methods'
 import { LeaderLostError, isTransportFailure } from './errors'
@@ -170,7 +170,7 @@ export class GraphClient {
 	 *   - write methods: surface `LeaderLostError` so the caller knows the
 	 *     operation may have been partially applied.
 	 */
-	private async invoke<T>(method: string, args: unknown[]): Promise<T> {
+	private async invoke<T>(method: string, args: unknown[], timeoutMs?: number): Promise<T> {
 		if (!this.client) throw new Error('Graph client not initialized')
 		// If a failover is currently running (kicked off eagerly by a
 		// transport 'exit' event, or by a previous failed call), wait for
@@ -229,7 +229,7 @@ export class GraphClient {
 			if (!this.client) throw new LeaderLostError(method)
 		}
 		try {
-			return await this.client.call<T>(method, args)
+			return await this.client.call<T>(method, args, timeoutMs)
 		} catch (err) {
 			if (!isTransportFailure(err)) throw err
 			if (!this.failoverProvider) {
@@ -251,7 +251,7 @@ export class GraphClient {
 				throw new LeaderLostError(method, failErr as Error)
 			}
 			if (!this.client) throw new LeaderLostError(method)
-			return await this.client.call<T>(method, args)
+			return await this.client.call<T>(method, args, timeoutMs)
 		}
 	}
 
@@ -288,19 +288,21 @@ export class GraphClient {
 	}
 
 	async scan(): Promise<void> {
-		await this.invoke<void>('scan', [])
+		// Full-scan round-trip: use the long scan timeout; the worker drives
+		// the whole scan internally (legacy non-batched path).
+		await this.invoke<void>('scan', [], RPC_SCAN_TIMEOUT_MS)
 	}
 
 	async prepareScan(): Promise<PrepareScanResult> {
-		return this.invoke<PrepareScanResult>('prepareScan', [])
+		return this.invoke<PrepareScanResult>('prepareScan', [], RPC_SCAN_TIMEOUT_MS)
 	}
 
 	async scanBatch(offset: number, batchSize: number): Promise<ScanBatchResult> {
-		return this.invoke<ScanBatchResult>('scanBatch', [offset, batchSize])
+		return this.invoke<ScanBatchResult>('scanBatch', [offset, batchSize], RPC_SCAN_TIMEOUT_MS)
 	}
 
 	async finalizeScan(): Promise<void> {
-		await this.invoke<void>('finalizeScan', [])
+		await this.invoke<void>('finalizeScan', [], RPC_SCAN_TIMEOUT_MS)
 	}
 
 	async getStats(): Promise<GraphStats> {

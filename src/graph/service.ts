@@ -35,7 +35,12 @@ import type {
 	ChangeImpactResult,
 	SymbolReferenceResult,
 } from './types'
-import { INDEXABLE_EXTENSIONS } from './constants'
+import {
+	INDEXABLE_EXTENSIONS,
+	GRAPH_SCAN_BATCH_SIZE_MIN,
+	GRAPH_SCAN_BATCH_SIZE_MAX,
+	GRAPH_SCAN_BATCH_TARGET_MS,
+} from './constants'
 import { IGNORED_DIRS, IGNORED_EXTS } from './utils'
 import type { GraphState, GraphStatsPayload } from '../utils/graph-status-store'
 
@@ -663,18 +668,48 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
 					// Prepare scan - collect files and get batch info
 					const prepResult = await client.prepareScan()
 
-					// Process files in batches with progress updates
+					// Process files in batches with adaptive sizing + progress updates.
+					// Start from the worker's suggested batchSize (small by default) and
+					// adjust up/down based on measured per-batch elapsed time, so total
+					// throughput stays high on fast machines while never exceeding the
+					// RPC scan timeout on slow ones / pathological files.
 					let offset = 0
 					let completed = false
+					let batchSize = Math.max(
+						GRAPH_SCAN_BATCH_SIZE_MIN,
+						Math.min(GRAPH_SCAN_BATCH_SIZE_MAX, prepResult.batchSize),
+					)
+					let totalSkippedTimeouts = 0
 
 					while (!completed) {
-						const batchResult = await client.scanBatch(offset, prepResult.batchSize)
+						const batchResult = await client.scanBatch(offset, batchSize)
 						offset = batchResult.nextOffset
 						completed = batchResult.completed
+						if (batchResult.skippedTimeouts) {
+							totalSkippedTimeouts += batchResult.skippedTimeouts
+						}
+
+						// Adaptive sizing: aim for ~GRAPH_SCAN_BATCH_TARGET_MS per batch.
+						const elapsed = batchResult.elapsedMs ?? 0
+						if (elapsed > 0) {
+							if (elapsed < GRAPH_SCAN_BATCH_TARGET_MS / 2) {
+								batchSize = Math.min(GRAPH_SCAN_BATCH_SIZE_MAX, Math.ceil(batchSize * 1.5))
+							} else if (elapsed > GRAPH_SCAN_BATCH_TARGET_MS) {
+								batchSize = Math.max(GRAPH_SCAN_BATCH_SIZE_MIN, Math.floor(batchSize * 0.5))
+							}
+						}
 
 						// Emit progress during indexing
-						const progressMessage = `Indexing graph: ${offset}/${prepResult.totalFiles} files`
+						const skippedSuffix =
+							totalSkippedTimeouts > 0 ? ` (skipped ${totalSkippedTimeouts} slow files)` : ''
+						const progressMessage = `Indexing graph: ${offset}/${prepResult.totalFiles} files${skippedSuffix}`
 						emitStatus('indexing', undefined, progressMessage)
+					}
+
+					if (totalSkippedTimeouts > 0) {
+						logger.log(
+							`Graph scan: skipped ${totalSkippedTimeouts} file(s) that exceeded per-file timeout; continuing`,
+						)
 					}
 
 					// Finalize - build derived state (PageRank, edges, call graph, etc.)

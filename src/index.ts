@@ -74,11 +74,22 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			logger.error('Failed to migrate ralph: KV entries', err)
 		}
 
-		const activeSandboxLoops = loopService.listActive().filter(s => s.sandbox && s.loopName)
+		// Best-effort loop state reconciliation. Never fail plugin init (and with it,
+		// forge agent registration) because of a transient KV/DB hiccup here.
+		let activeSandboxLoops: ReturnType<typeof loopService.listActive> = []
+		try {
+			activeSandboxLoops = loopService.listActive().filter(s => s.sandbox && s.loopName)
+		} catch (err) {
+			logger.error('Failed to list active loops; continuing with empty list', err)
+		}
 
-		const reconciledCount = loopService.reconcileStale()
-		if (reconciledCount > 0) {
-			logger.log(`Reconciled ${reconciledCount} stale loop(s) from previous session`)
+		try {
+			const reconciledCount = loopService.reconcileStale()
+			if (reconciledCount > 0) {
+				logger.log(`Reconciled ${reconciledCount} stale loop(s) from previous session`)
+			}
+		} catch (err) {
+			logger.error('Failed to reconcile stale loops; continuing', err)
 		}
 
 		let sandboxManager: ReturnType<typeof createSandboxManager> | null = null

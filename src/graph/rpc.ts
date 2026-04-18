@@ -12,6 +12,15 @@ import { WorkerTransport } from './ipc-transport'
  */
 export const RPC_TIMEOUT_MS = parseInt(process.env.GRAPH_RPC_TIMEOUT_MS ?? '120000', 10)
 
+/**
+ * Per-call RPC timeout for scan-related methods (prepareScan, scanBatch, finalizeScan).
+ * Scans can take minutes on large repos (tree-sitter parsing + SQLite writes), so they
+ * get a much longer budget than regular read/query RPCs.
+ * Configure via GRAPH_SCAN_TIMEOUT_MS environment variable.
+ * Default: 600000 (10 minutes)
+ */
+export const RPC_SCAN_TIMEOUT_MS = parseInt(process.env.GRAPH_SCAN_TIMEOUT_MS ?? '600000', 10)
+
 function isWorkerLike(x: unknown): x is Worker {
 	return !!x && typeof (x as any).postMessage === 'function' && typeof (x as any).terminate === 'function'
 }
@@ -89,7 +98,7 @@ export class RpcClient extends EventEmitter {
 		}
 	}
 
-	async call<T>(method: string, args: unknown[]): Promise<T> {
+	async call<T>(method: string, args: unknown[], timeoutMs: number = RPC_TIMEOUT_MS): Promise<T> {
 		if (this.terminated) {
 			throw new Error('Worker has been terminated')
 		}
@@ -103,8 +112,8 @@ export class RpcClient extends EventEmitter {
 		return new Promise<T>((resolve: (value: T) => void, reject) => {
 			const timeout = setTimeout(() => {
 				this.pendingCalls.delete(callId)
-				reject(new Error(`RPC call '${method}' timed out after ${RPC_TIMEOUT_MS}ms`))
-			}, RPC_TIMEOUT_MS)
+				reject(new Error(`RPC call '${method}' timed out after ${timeoutMs}ms`))
+			}, timeoutMs)
 
 			this.pendingCalls.set(callId, { resolve: resolve as (value: unknown) => void, reject, timeout })
 

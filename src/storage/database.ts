@@ -80,11 +80,36 @@ function deleteDatabaseFiles(dbPath: string): void {
  * Opens a managed Forge database with integrity verification.
  * If integrity check fails, deletes the corrupted DB files and recreates a fresh database.
  *
+ * Transient SQLITE_BUSY / SQLITE_LOCKED errors from concurrent sessions
+ * opening the same DB are retried with bounded backoff before surfacing.
+ *
  * @param dbPath - Path to the database file
  * @param bootstrap - Function to run schema initialization on the fresh/recovered DB
  * @returns A fresh or recovered Database instance
  */
 function openManagedForgeDatabase(dbPath: string, bootstrap: (db: Database) => void): Database {
+	const maxAttempts = 5
+	let lastErr: unknown
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		try {
+			return openManagedForgeDatabaseOnce(dbPath, bootstrap)
+		} catch (err) {
+			lastErr = err
+			const msg = err instanceof Error ? err.message : String(err)
+			const isTransient =
+				msg.includes('SQLITE_BUSY') || msg.includes('SQLITE_LOCKED') || msg.includes('database is locked')
+			if (!isTransient || attempt === maxAttempts - 1) {
+				throw err
+			}
+			// Bounded backoff: 100ms, 200ms, 400ms, 800ms
+			const waitMs = 100 * Math.pow(2, attempt)
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
+		}
+	}
+	throw lastErr
+}
+
+function openManagedForgeDatabaseOnce(dbPath: string, bootstrap: (db: Database) => void): Database {
 	let db: Database | null = null
 	let needsBootstrap = false
 

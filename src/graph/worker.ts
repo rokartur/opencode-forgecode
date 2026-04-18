@@ -2,6 +2,7 @@ import { Database } from '../runtime/sqlite'
 import { openGraphDatabase } from './database'
 import { RpcServer } from './rpc'
 import { RepoMap } from './repo-map'
+import { GRAPH_SCAN_BATCH_SIZE } from './constants'
 
 const dbPath = process.env['GRAPH_DB_PATH'] || ''
 const cwd = process.env['GRAPH_CWD'] || '.'
@@ -40,7 +41,7 @@ rpcServer.register('prepareScan', async () => {
 
 rpcServer.register('scanBatch', async (args: unknown[]) => {
 	const offset = (args[0] as number) || 0
-	const batchSize = (args[1] as number) || 500
+	const batchSize = (args[1] as number) || GRAPH_SCAN_BATCH_SIZE
 	return runExclusive(() => repoMap.scanBatch(offset, batchSize))
 })
 
