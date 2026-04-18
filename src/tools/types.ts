@@ -20,11 +20,14 @@ export interface ToolContext {
 	config: PluginConfig
 	/** Logger instance for the plugin. */
 	logger: Logger
-	/** Bun SQLite database instance. */
-	db: Database
+	/** Bun SQLite database instance. `null` when the plugin is running in
+	 * degraded mode because `initializeDatabase` failed; callers must only
+	 * rely on `kvService` for persistent state in that case. */
+	db: Database | null
 	/** Data directory path for plugin storage. */
 	dataDir: string
-	/** KV service for key-value storage. */
+	/** KV service for key-value storage. Transparently switches to an
+	 * in-memory backend in degraded mode. */
 	kvService: ReturnType<typeof createKvService>
 	/** Loop service for managing autonomous loops. */
 	loopService: ReturnType<typeof createLoopService>
@@ -40,4 +43,6 @@ export interface ToolContext {
 	sandboxManager: ReturnType<typeof createSandboxManager> | null
 	/** Graph service instance, null if graph is disabled. */
 	graphService: GraphService | null
+	/** True when plugin init fell back to in-memory KV due to DB failure. */
+	degraded?: boolean
 }

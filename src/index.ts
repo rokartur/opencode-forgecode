@@ -4,7 +4,7 @@ import { agents } from './agents'
 import { createConfigHandler } from './config'
 import { createSessionHooks, createLoopEventHandler, createHarnessHooks } from './hooks'
 import { initializeDatabase, resolveDataDir, closeDatabase } from './storage'
-import { createKvService } from './services/kv'
+import { createKvService, createInMemoryKvService } from './services/kv'
 import { createLoopService, migrateRalphKeys } from './services/loop'
 import { createGraphService } from './graph'
 import { loadPluginConfig } from './setup'
@@ -63,9 +63,22 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 
 		const dataDir = config.dataDir || resolveDataDir()
 
-		const db = initializeDatabase(dataDir)
-
-		const kvService = createKvService(db, logger, config.defaultKvTtlMs)
+		// Soft-fail DB init: if the persistent KV store cannot be opened (real
+		// corruption, EACCES, read-only FS, disk full), fall back to an
+		// in-memory KV so agents (forge/muse/sage) still get registered and
+		// the session remains usable, just without persistence. A fresh
+		// process start will retry normally.
+		let db: ReturnType<typeof initializeDatabase> | null = null
+		let kvService: ReturnType<typeof createKvService>
+		let degraded = false
+		try {
+			db = initializeDatabase(dataDir)
+			kvService = createKvService(db, logger, config.defaultKvTtlMs)
+		} catch (err) {
+			degraded = true
+			logger.error('Degraded mode: DB init failed; KV is in-memory for this session (data will not persist)', err)
+			kvService = createInMemoryKvService(logger, config.defaultKvTtlMs)
+		}
 
 		const loopService = createLoopService(kvService, projectId, logger, config.loop)
 		try {
@@ -174,6 +187,21 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			writeGraphStatus(kvService, projectId, UNAVAILABLE_STATUS)
 		}
 
+		if (degraded) {
+			// Surface the degraded session to the TUI status bar so the user
+			// notices that persistence is off this session.
+			try {
+				writeGraphStatus(kvService, projectId, {
+					state: 'error',
+					ready: false,
+					message: 'DB init failed; running with in-memory KV (no persistence)',
+					updatedAt: Date.now(),
+				})
+			} catch (err) {
+				logger.error('Failed to publish degraded status', err)
+			}
+		}
+
 		const compactionConfig: CompactionConfig | undefined = config.compaction
 		const messagesTransformConfig = config.messagesTransform
 		const sessionHooks = createSessionHooks(projectId, logger, input, compactionConfig)
@@ -231,7 +259,9 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 					logger.log('Graph service closed')
 				}
 
-				closeDatabase(db)
+				if (db) {
+					closeDatabase(db)
+				}
 				logger.log('Plugin cleanup complete')
 			})()
 			return cleanupPromise
@@ -262,6 +292,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			input,
 			sandboxManager,
 			graphService: graphService || null,
+			degraded,
 		}
 
 		const tools = createTools(ctx)
