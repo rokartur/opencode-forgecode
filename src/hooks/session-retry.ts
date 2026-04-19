@@ -98,9 +98,7 @@ export function createSessionRetryHooks(deps: SessionRetryHookDeps): SessionRetr
 			}
 
 			if (retriedMessages.has(entry.messageId)) {
-				deps.logger.log(
-					`session-retry: message ${entry.messageId} already retried once, not retrying again`,
-				)
+				deps.logger.log(`session-retry: message ${entry.messageId} already retried once, not retrying again`)
 				return
 			}
 			retriedMessages.add(entry.messageId)

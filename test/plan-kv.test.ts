@@ -372,10 +372,9 @@ describe('plan-append', () => {
 	})
 
 	test('creates plan when none exists', async () => {
-		const result = await tools['plan-append'].execute(
-			{ content: '# Plan\n\nFirst section' },
-			{ sessionID: 'test-session' } as any,
-		)
+		const result = await tools['plan-append'].execute({ content: '# Plan\n\nFirst section' }, {
+			sessionID: 'test-session',
+		} as any)
 
 		expect(result).toContain('Plan appended')
 		const stored = kvService.get<string>('test-project', 'plan:test-session')
@@ -385,10 +384,7 @@ describe('plan-append', () => {
 	test('appends to existing plan preserving separator', async () => {
 		kvService.set('test-project', 'plan:test-session', '# Plan\n\n## Phase 1\n- item\n')
 
-		await tools['plan-append'].execute(
-			{ content: '- item 2\n' },
-			{ sessionID: 'test-session' } as any,
-		)
+		await tools['plan-append'].execute({ content: '- item 2\n' }, { sessionID: 'test-session' } as any)
 
 		const stored = kvService.get<string>('test-project', 'plan:test-session')
 		expect(stored).toBe('# Plan\n\n## Phase 1\n- item\n- item 2\n')
@@ -397,10 +393,9 @@ describe('plan-append', () => {
 	test('inserts section heading when section arg is provided', async () => {
 		kvService.set('test-project', 'plan:test-session', '# Plan\n')
 
-		await tools['plan-append'].execute(
-			{ section: 'Verification', content: '- run tests' },
-			{ sessionID: 'test-session' } as any,
-		)
+		await tools['plan-append'].execute({ section: 'Verification', content: '- run tests' }, {
+			sessionID: 'test-session',
+		} as any)
 
 		const stored = kvService.get<string>('test-project', 'plan:test-session')
 		expect(stored).toBe('# Plan\n\n\n## Verification\n- run tests')
@@ -408,10 +403,7 @@ describe('plan-append', () => {
 
 	test('rejects oversized append with guidance', async () => {
 		const huge = 'x'.repeat(8_001)
-		const result = await tools['plan-append'].execute(
-			{ content: huge },
-			{ sessionID: 'test-session' } as any,
-		)
+		const result = await tools['plan-append'].execute({ content: huge }, { sessionID: 'test-session' } as any)
 
 		expect(result).toContain('Error')
 		expect(result).toContain('plan-append')
@@ -464,10 +456,9 @@ describe('plan-edit advanced', () => {
 	})
 
 	test('occurrence out of range returns error', async () => {
-		const result = await tools['plan-edit'].execute(
-			{ old_string: '- Item 1', new_string: '- x', occurrence: 9 },
-			{ sessionID: 'test-session' } as any,
-		)
+		const result = await tools['plan-edit'].execute({ old_string: '- Item 1', new_string: '- x', occurrence: 9 }, {
+			sessionID: 'test-session',
+		} as any)
 
 		expect(result).toContain('out of range')
 		// Unchanged
@@ -476,10 +467,9 @@ describe('plan-edit advanced', () => {
 	})
 
 	test('non-unique old_string without disambiguation suggests options', async () => {
-		const result = await tools['plan-edit'].execute(
-			{ old_string: '- Item 1', new_string: '- x' },
-			{ sessionID: 'test-session' } as any,
-		)
+		const result = await tools['plan-edit'].execute({ old_string: '- Item 1', new_string: '- x' }, {
+			sessionID: 'test-session',
+		} as any)
 
 		expect(result).toContain('found 3 times')
 		expect(result).toContain('replace_all')

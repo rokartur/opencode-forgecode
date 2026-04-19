@@ -55,9 +55,7 @@ export function createPlanTools(ctx: ToolContext): Record<string, ReturnType<typ
 				const key = resolvePlanKey(context.sessionID)
 				kvService.set(projectId, key, args.content)
 
-				logger.log(
-					`plan-write: stored plan at ${key} (${sizeHint(args.content)}, ${Date.now() - started}ms)`,
-				)
+				logger.log(`plan-write: stored plan at ${key} (${sizeHint(args.content)}, ${Date.now() - started}ms)`)
 
 				return `Plan stored (${args.content.split('\n').length} lines, ${args.content.length} chars)`
 			},
