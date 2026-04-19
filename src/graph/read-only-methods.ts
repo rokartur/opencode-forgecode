@@ -31,6 +31,8 @@ export const READ_ONLY_METHODS: ReadonlySet<string> = new Set([
 	'getCircularDependencies',
 	'getChangeImpact',
 	'getSymbolReferences',
+	'getSymbolBlastRadius',
+	'getCallGraphCycles',
 	'render',
 ])
 

@@ -193,15 +193,31 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
 		}),
 
 		'graph-symbols': tool({
-			description: 'Query symbol-level graph information (find, search, callers, callees, etc.)',
+			description:
+				'Query symbol-level graph information (find, search, callers, callees, blast_radius, call_cycles, etc.)',
 			args: {
 				action: z
-					.enum(['find', 'search', 'signature', 'callers', 'callees', 'references'])
+					.enum([
+						'find',
+						'search',
+						'signature',
+						'callers',
+						'callees',
+						'references',
+						'blast_radius',
+						'call_cycles',
+					])
 					.describe('Query type'),
 				name: z.string().optional().describe('Symbol name'),
 				file: z.string().optional().describe('File path'),
 				kind: z.string().optional().describe('Symbol kind filter'),
 				limit: z.number().optional().default(20).describe('Maximum results'),
+				min_confidence: z
+					.number()
+					.optional()
+					.describe(
+						'Filter callers/callees by edge confidence (0..1). 1.0 keeps only EXTRACTED (direct symbol match); 0.7 also admits INFERRED (known file, symbol not resolved).',
+					),
 			},
 			execute: async args => {
 				if (!graphService || !graphService.ready) {
@@ -253,12 +269,16 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
 							// Need path and line - for now search by name first
 							const symbols = await graphService.findSymbols(args.name, 1)
 							if (symbols.length === 0) return `No callers found for "${args.name}"`
-							const results = await graphService.getCallers(symbols[0].path, symbols[0].line)
+							const results = await graphService.getCallers(
+								symbols[0].path,
+								symbols[0].line,
+								args.min_confidence,
+							)
 							if (results.length === 0) return `No callers found for "${args.name}"`
 							return results
 								.map(
 									r =>
-										`- ${r.callerName} in ${r.callerPath}:${r.callerLine} (calls at line ${r.callLine})`,
+										`- ${r.callerName} in ${r.callerPath}:${r.callerLine} (calls at line ${r.callLine}) [${r.tier} ${r.confidence.toFixed(2)}]`,
 								)
 								.join('\n')
 						}
@@ -268,9 +288,18 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
 							// Need path and line - for now search by name first
 							const symbols = await graphService.findSymbols(args.name, 1)
 							if (symbols.length === 0) return `No symbol found matching "${args.name}"`
-							const results = await graphService.getCallees(symbols[0].path, symbols[0].line)
+							const results = await graphService.getCallees(
+								symbols[0].path,
+								symbols[0].line,
+								args.min_confidence,
+							)
 							if (results.length === 0) return `No callees found for "${args.name}"`
-							return results.map(r => `- ${r.calleeName} in ${r.calleeFile}:${r.calleeLine}`).join('\n')
+							return results
+								.map(
+									r =>
+										`- ${r.calleeName} in ${r.calleeFile}:${r.calleeLine} [${r.tier} ${r.confidence.toFixed(2)}]`,
+								)
+								.join('\n')
 						}
 
 						case 'references': {
@@ -284,6 +313,33 @@ export function createGraphTools(ctx: ToolContext & GraphToolContext): Record<st
 									return `- [${r.kind}] **${r.path}**${loc}${ctx}`
 								})
 								.join('\n')
+						}
+
+						case 'blast_radius': {
+							if (!args.name) return 'name parameter required (symbol name)'
+							const result = await graphService.getSymbolBlastRadius(args.name, 5)
+							if (result.totalAffected === 0) return `No transitive callers found for "${args.name}"`
+							const header = `**${result.root.name}** in ${result.root.path}:${result.root.line} — ${result.totalAffected} affected symbol(s):\n`
+							const body = result.affected
+								.map(
+									a =>
+										`${'  '.repeat(a.depth - 1)}- ${a.name} in ${a.path}:${a.line} (depth: ${a.depth})`,
+								)
+								.join('\n')
+							return header + body
+						}
+
+						case 'call_cycles': {
+							const result = await graphService.getCallGraphCycles(args.limit)
+							if (result.length === 0) return 'No call-graph cycles found.'
+							return result
+								.map(
+									(r, i) =>
+										`**Cycle ${i + 1}** (${r.length} symbols):\n${r.cycle
+											.map(s => `  - ${s.name} in ${s.path}:${s.line}`)
+											.join('\n')}`,
+								)
+								.join('\n\n')
 						}
 
 						default:

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import {
 	hashProjectId,
-	hashGraphCacheScope,
+	_hashGraphCacheScope,
 	resolveGraphCacheDir,
 	resolveGraphCacheDirLegacy,
 	hasGraphCache,

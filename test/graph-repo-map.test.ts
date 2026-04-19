@@ -1,12 +1,11 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test'
-import { Database } from 'bun:sqlite'
 import { RepoMap } from '../src/graph/repo-map'
 import { initializeGraphDatabase } from '../src/graph/database'
 import { mkdirSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 
 let testDir: string
-let dbPath: string
+let _dbPath: string
 let repoMap: RepoMap
 
 beforeEach(async () => {
@@ -19,7 +18,7 @@ beforeEach(async () => {
 	execSync('git config user.email "test@test.com"', { cwd: testDir })
 	execSync('git config user.name "Test"', { cwd: testDir })
 
-	dbPath = join(testDir, 'test.db')
+	_dbPath = join(testDir, 'test.db')
 	const db = initializeGraphDatabase('test-project', testDir)
 
 	repoMap = new RepoMap({ cwd: testDir, db })
@@ -101,7 +100,7 @@ test('token extraction works when repo root differs from process cwd', async () 
 	execSync('git add .', { cwd: outsideDir })
 
 	// Create RepoMap with the outside directory as cwd
-	const dbPath2 = join(outsideDir, 'test.db')
+	const _dbPath2 = join(outsideDir, 'test.db')
 	const db = initializeGraphDatabase('test-project-2', outsideDir)
 	const outsideRepoMap = new RepoMap({ cwd: outsideDir, db })
 	await outsideRepoMap.initialize()

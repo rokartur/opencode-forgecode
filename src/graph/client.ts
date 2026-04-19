@@ -22,6 +22,8 @@ import type {
 	CircularDependencyResult,
 	ChangeImpactResult,
 	SymbolReferenceResult,
+	SymbolBlastRadiusResult,
+	CallGraphCycleResult,
 } from './types'
 import type { Logger } from '../types'
 
@@ -345,12 +347,12 @@ export class GraphClient {
 		return this.invoke<SymbolSignatureResult | null>('getSymbolSignature', [path, line])
 	}
 
-	async getCallers(path: string, line: number): Promise<CallerResult[]> {
-		return this.invoke<CallerResult[]>('getCallers', [path, line])
+	async getCallers(path: string, line: number, minConfidence = 0): Promise<CallerResult[]> {
+		return this.invoke<CallerResult[]>('getCallers', [path, line, minConfidence])
 	}
 
-	async getCallees(path: string, line: number): Promise<CalleeResult[]> {
-		return this.invoke<CalleeResult[]>('getCallees', [path, line])
+	async getCallees(path: string, line: number, minConfidence = 0): Promise<CalleeResult[]> {
+		return this.invoke<CalleeResult[]>('getCallees', [path, line, minConfidence])
 	}
 
 	async getUnusedExports(limit = 20): Promise<UnusedExportResult[]> {
@@ -387,6 +389,14 @@ export class GraphClient {
 
 	async getSymbolReferences(name: string, limit = 50): Promise<SymbolReferenceResult[]> {
 		return this.invoke<SymbolReferenceResult[]>('getSymbolReferences', [name, limit])
+	}
+
+	async getSymbolBlastRadius(name: string, maxDepth = 5): Promise<SymbolBlastRadiusResult> {
+		return this.invoke<SymbolBlastRadiusResult>('getSymbolBlastRadius', [name, maxDepth])
+	}
+
+	async getCallGraphCycles(limit = 20): Promise<CallGraphCycleResult[]> {
+		return this.invoke<CallGraphCycleResult[]>('getCallGraphCycles', [limit])
 	}
 
 	async onFileChanged(absPath: string): Promise<void> {

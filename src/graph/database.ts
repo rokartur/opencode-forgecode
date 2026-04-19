@@ -387,6 +387,20 @@ function createTables(db: Database): void {
 	db.run(`CREATE INDEX IF NOT EXISTS idx_calls_callee_name ON calls(callee_name)`)
 	db.run(`CREATE INDEX IF NOT EXISTS idx_calls_callee_file ON calls(callee_file_id)`)
 
+	// Migration (Etap 9b): add confidence/tier columns to existing calls tables.
+	// New rows get 1.0/'EXTRACTED' via DEFAULT; existing rows inherit the same
+	// defaults, which preserves prior behavior where every stored call was
+	// treated as fully resolved.
+	const callsCols = db.prepare('PRAGMA table_info(calls)').all() as Array<{ name: string }>
+	const hasConfidence = callsCols.some(c => c.name === 'confidence')
+	const hasTier = callsCols.some(c => c.name === 'tier')
+	if (!hasConfidence) {
+		db.run(`ALTER TABLE calls ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0`)
+	}
+	if (!hasTier) {
+		db.run(`ALTER TABLE calls ADD COLUMN tier TEXT NOT NULL DEFAULT 'EXTRACTED'`)
+	}
+
 	// Co-changes table
 	db.run(`
     CREATE TABLE IF NOT EXISTS cochanges (

@@ -34,6 +34,8 @@ import type {
 	CircularDependencyResult,
 	ChangeImpactResult,
 	SymbolReferenceResult,
+	SymbolBlastRadiusResult,
+	CallGraphCycleResult,
 } from './types'
 import {
 	INDEXABLE_EXTENSIONS,
@@ -119,13 +121,14 @@ export interface GraphService {
 	 * @param path - Absolute path to the file.
 	 * @param line - Line number of the symbol definition.
 	 */
-	getCallers(path: string, line: number): Promise<CallerResult[]>
+	getCallers(path: string, line: number, minConfidence?: number): Promise<CallerResult[]>
 	/**
 	 * Returns all symbols called by the symbol at the given location.
 	 * @param path - Absolute path to the file.
 	 * @param line - Line number of the symbol definition.
+	 * @param minConfidence - Filter edges with confidence >= this value (0..1). Default 0.
 	 */
-	getCallees(path: string, line: number): Promise<CalleeResult[]>
+	getCallees(path: string, line: number, minConfidence?: number): Promise<CalleeResult[]>
 	/**
 	 * Returns exported symbols that appear unused.
 	 * @param limit - Maximum number of results. Defaults to 50.
@@ -169,6 +172,17 @@ export interface GraphService {
 	 * @param limit - Maximum number of results. Defaults to 50.
 	 */
 	getSymbolReferences(name: string, limit?: number): Promise<SymbolReferenceResult[]>
+	/**
+	 * Returns the symbol-level blast radius — symbols transitively reachable as callers.
+	 * @param name - Symbol name to start from.
+	 * @param maxDepth - Maximum BFS depth. Defaults to 5.
+	 */
+	getSymbolBlastRadius(name: string, maxDepth?: number): Promise<SymbolBlastRadiusResult>
+	/**
+	 * Detects cycles in the call graph (symbol-level, not file-level).
+	 * @param limit - Maximum number of cycles. Defaults to 20.
+	 */
+	getCallGraphCycles(limit?: number): Promise<CallGraphCycleResult[]>
 	/**
 	 * Renders a text visualization of the code graph.
 	 * @param opts - Rendering options.
@@ -236,8 +250,8 @@ function makeReadOnlyDispatcher(repoMap: RepoMap): (method: string, args: unknow
 		findSymbols: a => repoMap.findSymbols((a[0] as string) ?? '', (a[1] as number) ?? 50),
 		searchSymbolsFts: a => repoMap.searchSymbolsFts((a[0] as string) ?? '', (a[1] as number) ?? 50),
 		getSymbolSignature: a => repoMap.getSymbolSignature((a[0] as string) ?? '', (a[1] as number) ?? 0),
-		getCallers: a => repoMap.getCallers((a[0] as string) ?? '', (a[1] as number) ?? 0),
-		getCallees: a => repoMap.getCallees((a[0] as string) ?? '', (a[1] as number) ?? 0),
+		getCallers: a => repoMap.getCallers((a[0] as string) ?? '', (a[1] as number) ?? 0, (a[2] as number) ?? 0),
+		getCallees: a => repoMap.getCallees((a[0] as string) ?? '', (a[1] as number) ?? 0, (a[2] as number) ?? 0),
 		getUnusedExports: a => repoMap.getUnusedExports((a[0] as number) ?? 50),
 		getDuplicateStructures: a => repoMap.getDuplicateStructures((a[0] as number) ?? 20),
 		getNearDuplicates: a => repoMap.getNearDuplicates((a[0] as number) ?? 0.8, (a[1] as number) ?? 50),
@@ -246,6 +260,8 @@ function makeReadOnlyDispatcher(repoMap: RepoMap): (method: string, args: unknow
 		getCircularDependencies: a => repoMap.getCircularDependencies((a[0] as number) ?? 20),
 		getChangeImpact: a => repoMap.getChangeImpact((a[0] as string[]) ?? [], (a[1] as number) ?? 5),
 		getSymbolReferences: a => repoMap.getSymbolReferences((a[0] as string) ?? '', (a[1] as number) ?? 50),
+		getSymbolBlastRadius: a => repoMap.getSymbolBlastRadius((a[0] as string) ?? '', (a[1] as number) ?? 5),
+		getCallGraphCycles: a => repoMap.getCallGraphCycles((a[0] as number) ?? 20),
 		render: a => repoMap.render(a[0] as { maxFiles?: number; maxSymbols?: number } | undefined),
 	}
 	return async (method, args) => {
@@ -467,6 +483,7 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
 	const effectiveDebounceMs = debounceMs ?? DEFAULT_DEBOUNCE_MS
 
 	function emitStatus(state: GraphState, stats?: GraphStatsPayload, message?: string): void {
+		if (closing) return
 		if (onStatusChange) {
 			onStatusChange(state, stats, message)
 		}
@@ -876,14 +893,14 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
 			return client.getSymbolSignature(path, line)
 		},
 
-		async getCallers(path: string, line: number): Promise<CallerResult[]> {
+		async getCallers(path: string, line: number, minConfidence?: number): Promise<CallerResult[]> {
 			if (!initialized) await initialize()
-			return client.getCallers(path, line)
+			return client.getCallers(path, line, minConfidence)
 		},
 
-		async getCallees(path: string, line: number): Promise<CalleeResult[]> {
+		async getCallees(path: string, line: number, minConfidence?: number): Promise<CalleeResult[]> {
 			if (!initialized) await initialize()
-			return client.getCallees(path, line)
+			return client.getCallees(path, line, minConfidence)
 		},
 
 		async getUnusedExports(limit = 50): Promise<UnusedExportResult[]> {
@@ -924,6 +941,16 @@ export function createGraphService(config: GraphServiceConfig): GraphService {
 		async getSymbolReferences(name: string, limit = 50): Promise<SymbolReferenceResult[]> {
 			if (!initialized) await initialize()
 			return client.getSymbolReferences(name, limit)
+		},
+
+		async getSymbolBlastRadius(name: string, maxDepth = 5): Promise<SymbolBlastRadiusResult> {
+			if (!initialized) await initialize()
+			return client.getSymbolBlastRadius(name, maxDepth)
+		},
+
+		async getCallGraphCycles(limit = 20): Promise<CallGraphCycleResult[]> {
+			if (!initialized) await initialize()
+			return client.getCallGraphCycles(limit)
 		},
 
 		async render(opts?: { maxFiles?: number; maxSymbols?: number }): Promise<{ content: string; paths: string[] }> {

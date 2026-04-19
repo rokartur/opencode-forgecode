@@ -2,7 +2,6 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { initializeGraphDatabase, closeGraphDatabase } from '../src/graph/database'
 import { existsSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { Database } from 'bun:sqlite'
 import { hashGraphCacheScope } from '../src/storage/graph-projects'
 
 const TEST_DATA_DIR = '/tmp/opencode-graph-db-test-' + Date.now()
@@ -208,7 +207,7 @@ describe('Graph database corruption recovery', () => {
 
 	test('should be able to insert and read data after graph DB recovery', () => {
 		// Initialize and then corrupt
-		const db = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
+		const _db = initializeGraphDatabase(testProjectId, testDataDir, testDataDir)
 		closeGraphDatabase()
 
 		// Get the graph cache DB path using hashGraphCacheScope

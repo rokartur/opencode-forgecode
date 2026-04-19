@@ -104,13 +104,15 @@ rpcServer.register('getSymbolSignature', async (args: unknown[]) => {
 rpcServer.register('getCallers', async (args: unknown[]) => {
 	const path = (args[0] as string) || ''
 	const line = (args[1] as number) || 0
-	return repoMap.getCallers(path, line)
+	const minConfidence = (args[2] as number) ?? 0
+	return repoMap.getCallers(path, line, minConfidence)
 })
 
 rpcServer.register('getCallees', async (args: unknown[]) => {
 	const path = (args[0] as string) || ''
 	const line = (args[1] as number) || 0
-	return repoMap.getCallees(path, line)
+	const minConfidence = (args[2] as number) ?? 0
+	return repoMap.getCallees(path, line, minConfidence)
 })
 
 rpcServer.register('getUnusedExports', async (args: unknown[]) => {

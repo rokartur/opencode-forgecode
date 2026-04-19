@@ -19,11 +19,11 @@ function createMockGraphService(): GraphService {
 					symbols: 5,
 					language: 'typescript',
 				})),
-		getFileDependents: async path => [{ path: 'dep.ts', weight: 1.0 }],
-		getFileDependencies: async path => [{ path: 'dependency.ts', weight: 1.0 }],
-		getFileCoChanges: async path => [{ path: 'cochange.ts', count: 3 }],
-		getFileBlastRadius: async path => 5,
-		getFileSymbols: async path => [
+		getFileDependents: async _path => [{ path: 'dep.ts', weight: 1.0 }],
+		getFileDependencies: async _path => [{ path: 'dependency.ts', weight: 1.0 }],
+		getFileCoChanges: async _path => [{ path: 'cochange.ts', count: 3 }],
+		getFileBlastRadius: async _path => 5,
+		getFileSymbols: async _path => [
 			{
 				name: 'testFunc',
 				kind: 'function',
@@ -32,7 +32,7 @@ function createMockGraphService(): GraphService {
 				endLine: 10,
 			},
 		],
-		findSymbols: async (name, limit) => [
+		findSymbols: async (name, _limit) => [
 			{
 				name,
 				path: 'test.ts',
@@ -42,7 +42,7 @@ function createMockGraphService(): GraphService {
 				pagerank: 1.0,
 			},
 		],
-		searchSymbolsFts: async (query, limit) => [
+		searchSymbolsFts: async (query, _limit) => [
 			{
 				name: query,
 				path: 'test.ts',
@@ -58,7 +58,7 @@ function createMockGraphService(): GraphService {
 			signature: 'export function test(): void',
 			line,
 		}),
-		getCallers: async (path, line) => [
+		getCallers: async (_path, _line) => [
 			{
 				callerName: 'caller',
 				callerPath: 'caller.ts',
@@ -66,7 +66,7 @@ function createMockGraphService(): GraphService {
 				callLine: 10,
 			},
 		],
-		getCallees: async (path, line) => [
+		getCallees: async (_path, _line) => [
 			{
 				calleeName: 'callee',
 				calleeFile: 'callee.ts',
@@ -74,14 +74,14 @@ function createMockGraphService(): GraphService {
 				callLine: 10,
 			},
 		],
-		getUnusedExports: async (limit = 50) => [],
-		getDuplicateStructures: async (limit = 20) => [],
-		getNearDuplicates: async (threshold = 0.8, limit = 50) => [],
-		getExternalPackages: async (limit = 50) => [
+		getUnusedExports: async (_limit = 50) => [],
+		getDuplicateStructures: async (_limit = 20) => [],
+		getNearDuplicates: async (_threshold = 0.8, _limit = 50) => [],
+		getExternalPackages: async (_limit = 50) => [
 			{ package: 'express', fileCount: 2, specifiers: ['default', 'Router'] },
 		],
-		render: async opts => ({ content: '// test', paths: ['test.ts'] }),
-		onFileChanged: path => {},
+		render: async _opts => ({ content: '// test', paths: ['test.ts'] }),
+		onFileChanged: _path => {},
 	}
 }
 

@@ -8,7 +8,7 @@ import { initializeDatabase, closeDatabase } from '../src/storage'
 import {
 	createGraphStatusCallback,
 	readGraphStatus,
-	GRAPH_STATUS_KEY,
+	_GRAPH_STATUS_KEY,
 	UNAVAILABLE_STATUS,
 } from '../src/utils/graph-status-store'
 import { Database } from 'bun:sqlite'
@@ -255,7 +255,7 @@ describe('GraphService status callback', () => {
 	})
 
 	test('should write unavailable status when graph is disabled', () => {
-		const logger = createTestLogger()
+		const _logger = createTestLogger()
 
 		// Simulate disabled graph by writing unavailable status
 		writeFileSync(join(testDir, 'test.json'), JSON.stringify(UNAVAILABLE_STATUS))

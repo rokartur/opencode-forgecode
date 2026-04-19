@@ -7,7 +7,6 @@ import { resolveGraphCacheDir } from '../src/storage/graph-projects'
 import { readGraphCacheMetadata } from '../src/graph/database'
 import { initializeDatabase, closeDatabase } from '../src/storage'
 import { createKvService } from '../src/services/kv'
-import type { Logger } from '../src/types'
 
 const TEST_DATA_DIR = '/tmp/opencode-worktree-seed-test-' + Date.now()
 
@@ -326,7 +325,7 @@ describe('seedWorktreeGraphScope', () => {
 		createTestFiles(ctx.targetCwd, fileCount, maxMtimeMs)
 
 		// Write ready status to source scope
-		const { writeGraphStatus, getGraphStatusKey } = await import('../src/utils/graph-status-store')
+		const { writeGraphStatus, _getGraphStatusKey } = await import('../src/utils/graph-status-store')
 		const sourceStatus = {
 			state: 'ready' as const,
 			ready: true,

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { createGraphService } from '../src/graph/service'
-import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import type { Logger } from '../src/types'
 

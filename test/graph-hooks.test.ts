@@ -972,8 +972,8 @@ describe('branch-change detection', () => {
 
 	test('should handle Windows-style paths in containment check', () => {
 		// Test that paths with backslashes are handled correctly
-		const windowsPath = 'C:\\repo\\src\\file.ts'
-		const windowsCwd = 'C:\\repo'
+		const _windowsPath = 'C:\\repo\\src\\file.ts'
+		const _windowsCwd = 'C:\\repo'
 
 		// Simulate what resolve() would do - on Unix it keeps backslashes as-is
 		// The key is that the containment check should work regardless of separator style

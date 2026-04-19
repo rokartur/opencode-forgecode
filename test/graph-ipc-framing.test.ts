@@ -58,7 +58,10 @@ describe('ipc-framing', () => {
 		const dec = new FrameDecoder()
 		const header = Buffer.alloc(4)
 		header.writeUInt32BE(10, 0)
-		;[...dec.push(Buffer.concat([header, Buffer.from('partial')]))]
+		// Iterate the generator so the partial chunk is consumed into the internal buffer.
+		for (const _ of dec.push(Buffer.concat([header, Buffer.from('partial')]))) {
+			// no complete frames expected
+		}
 		expect(dec.buffered).toBeGreaterThan(0)
 		dec.reset()
 		expect(dec.buffered).toBe(0)

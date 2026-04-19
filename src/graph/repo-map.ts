@@ -8,6 +8,7 @@ import { existsSync, statSync } from 'fs'
 import { TreeSitterBackend } from './tree-sitter'
 import { FileCache } from './cache'
 import { tokenize, computeMinHash, computeFragmentHashes, jaccardSimilarity } from './clone-detection'
+import { detectCommunities, detectBridges, detectSurpriseEdges } from './communities'
 import {
 	INDEXABLE_EXTENSIONS,
 	PAGERANK_ITERATIONS,
@@ -28,6 +29,7 @@ import type {
 	SymbolSignatureResult,
 	CallerResult,
 	CalleeResult,
+	EdgeConfidenceTier,
 	UnusedExportResult,
 	DuplicateStructureResult,
 	NearDuplicateResult,
@@ -41,6 +43,8 @@ import type {
 	ChangeImpactResult,
 	ImpactedFile,
 	SymbolReferenceResult,
+	SymbolBlastRadiusResult,
+	CallGraphCycleResult,
 } from './types'
 
 interface IndexedFile {
@@ -118,6 +122,7 @@ export class RepoMap {
 			getEdgesByTarget: this.db.prepare('SELECT * FROM edges WHERE target_file_id = ?'),
 			getAllFiles: this.db.prepare('SELECT * FROM files ORDER BY pagerank DESC'),
 			getAllSymbols: this.db.prepare('SELECT * FROM symbols'),
+			getSymbolsByName: this.db.prepare('SELECT id, name, line, file_id FROM symbols WHERE name = ? LIMIT 10'),
 			getAllEdges: this.db.prepare('SELECT * FROM edges'),
 			getAllRefs: this.db.prepare('SELECT * FROM refs'),
 			insertFile: this.db.prepare(`
@@ -234,8 +239,8 @@ export class RepoMap {
         SELECT id FROM symbols WHERE file_id = ? AND name = ? AND is_exported = 1 LIMIT 1
       `),
 			insertCall: this.db.prepare(`
-        INSERT INTO calls (caller_symbol_id, callee_name, callee_symbol_id, callee_file_id, line)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO calls (caller_symbol_id, callee_name, callee_symbol_id, callee_file_id, line, confidence, tier)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `),
 			// Unused exports - single anti-join query
 			getUnusedExportsQuery: this.db.prepare(`
@@ -1043,7 +1048,7 @@ export class RepoMap {
 		}
 	}
 
-	getCallers(path: string, line: number): CallerResult[] {
+	getCallers(path: string, line: number, minConfidence = 0): CallerResult[] {
 		// Find the symbol at the given location
 		const fileId = this.stmts.getFileByPath.get(path) as { id: number } | undefined
 		if (!fileId) return []
@@ -1057,17 +1062,21 @@ export class RepoMap {
 		// Find all calls where this symbol is the callee - use both name and file for disambiguation
 		const callers = this.db
 			.prepare(`
-      SELECT s.name as caller_name, f.path as caller_path, s.line as caller_line, c.line as call_line
+      SELECT s.name as caller_name, f.path as caller_path, s.line as caller_line, c.line as call_line,
+             c.confidence, c.tier
       FROM calls c
       JOIN symbols s ON c.caller_symbol_id = s.id
       JOIN files f ON s.file_id = f.id
       WHERE c.callee_name = ? AND (c.callee_file_id IS NULL OR c.callee_file_id = ?)
+        AND c.confidence >= ?
     `)
-			.all(symbol.name, fileId.id) as Array<{
+			.all(symbol.name, fileId.id, minConfidence) as Array<{
 			caller_name: string
 			caller_path: string
 			caller_line: number
 			call_line: number
+			confidence: number
+			tier: EdgeConfidenceTier
 		}>
 
 		return callers.map(c => ({
@@ -1075,10 +1084,12 @@ export class RepoMap {
 			callerPath: c.caller_path,
 			callerLine: c.caller_line,
 			callLine: c.call_line,
+			confidence: c.confidence,
+			tier: c.tier,
 		}))
 	}
 
-	getCallees(path: string, line: number): CalleeResult[] {
+	getCallees(path: string, line: number, minConfidence = 0): CalleeResult[] {
 		// Find the symbol at the given location
 		const fileId = this.stmts.getFileByPath.get(path) as { id: number } | undefined
 		if (!fileId) return []
@@ -1093,16 +1104,20 @@ export class RepoMap {
 		const callees = this.db
 			.prepare(`
       SELECT c.callee_name, f.path as callee_file, c.line as call_line, 
-             (SELECT line FROM symbols WHERE id = c.callee_symbol_id) as callee_def_line
+             (SELECT line FROM symbols WHERE id = c.callee_symbol_id) as callee_def_line,
+             c.confidence, c.tier
       FROM calls c
       JOIN files f ON c.callee_file_id = f.id
       WHERE c.caller_symbol_id = ?
+        AND c.confidence >= ?
     `)
-			.all(symbol.id) as Array<{
+			.all(symbol.id, minConfidence) as Array<{
 			callee_name: string
 			callee_file: string
 			call_line: number
 			callee_def_line: number | undefined
+			confidence: number
+			tier: EdgeConfidenceTier
 		}>
 
 		return callees.map(c => ({
@@ -1110,7 +1125,537 @@ export class RepoMap {
 			calleeFile: c.callee_file,
 			calleeLine: c.callee_def_line || c.call_line,
 			callLine: c.call_line,
+			confidence: c.confidence,
+			tier: c.tier,
 		}))
+	}
+
+	/**
+	 * BFS traversal over the call graph starting from the symbol at (path, line).
+	 *
+	 * Budget-aware: stops on whichever of `maxDepth`, `maxNodes`, or
+	 * `maxTokens` hits first. `maxTokens` is a coarse cap on the cumulative
+	 * size of emitted node identifiers (`name + path`); it is not a real
+	 * LLM tokenizer, just a cheap proxy to bound output size for tooling.
+	 *
+	 * Edges below `minConfidence` (see Etap 9b) are skipped entirely,
+	 * so walking from an EXTRACTED-only perspective is just
+	 * `{ minConfidence: 1.0 }`.
+	 */
+	traverse(opts: {
+		path: string
+		line: number
+		direction?: 'in' | 'out' | 'both'
+		maxDepth?: number
+		maxTokens?: number
+		minConfidence?: number
+		maxNodes?: number
+	}): import('./types').TraverseResult {
+		const direction = opts.direction ?? 'out'
+		const maxDepth = Math.max(1, opts.maxDepth ?? 3)
+		const maxNodes = Math.max(1, opts.maxNodes ?? 500)
+		const maxTokens = opts.maxTokens ?? Number.POSITIVE_INFINITY
+		const minConfidence = opts.minConfidence ?? 0
+
+		const fileRow = this.stmts.getFileByPath.get(opts.path) as { id: number } | undefined
+		if (!fileRow) {
+			return {
+				root: { name: '', path: opts.path, line: opts.line },
+				nodes: [],
+				truncated: false,
+			}
+		}
+
+		const rootSym = this.stmts.getSymbolByFileAndLine.get(fileRow.id, opts.line) as
+			| { id: number; name: string }
+			| undefined
+		if (!rootSym) {
+			return {
+				root: { name: '', path: opts.path, line: opts.line },
+				nodes: [],
+				truncated: false,
+			}
+		}
+
+		// Prepare queries lazily — avoids bloating the stmts cache for users
+		// who never traverse.
+		const callersStmt = this.db.prepare(`
+			SELECT s.id, s.name, s.line, f.path, c.confidence, c.tier
+			FROM calls c
+			JOIN symbols s ON c.caller_symbol_id = s.id
+			JOIN files f ON s.file_id = f.id
+			WHERE c.callee_name = ? AND (c.callee_file_id IS NULL OR c.callee_file_id = ?)
+			  AND c.confidence >= ?
+		`)
+		const calleesStmt = this.db.prepare(`
+			SELECT s2.id, s2.name, s2.line, f2.path, c.confidence, c.tier
+			FROM calls c
+			JOIN symbols s2 ON c.callee_symbol_id = s2.id
+			JOIN files f2 ON s2.file_id = f2.id
+			WHERE c.caller_symbol_id = ? AND c.confidence >= ?
+		`)
+
+		interface QItem {
+			symbolId: number
+			symbolName: string
+			symbolPath: string
+			fileId: number
+			depth: number
+		}
+		const visited = new Set<number>()
+		visited.add(rootSym.id)
+
+		const rootPathRow = this.stmts.getFileById.get(fileRow.id) as { path: string } | undefined
+		const rootPath = rootPathRow?.path ?? opts.path
+		const queue: QItem[] = [
+			{
+				symbolId: rootSym.id,
+				symbolName: rootSym.name,
+				symbolPath: rootPath,
+				fileId: fileRow.id,
+				depth: 0,
+			},
+		]
+		const nodes: import('./types').TraverseNode[] = []
+		let tokens = 0
+		let truncated = false
+		let stopReason: 'maxDepth' | 'maxTokens' | 'maxNodes' | undefined
+
+		while (queue.length > 0) {
+			const item = queue.shift()!
+			if (item.depth >= maxDepth) {
+				// Depth cap reached for this branch; other branches may still expand.
+				// We still emit the boundary node if present (added when discovered).
+				continue
+			}
+
+			type Neighbour = {
+				id: number
+				name: string
+				line: number
+				path: string
+				confidence: number
+				tier: EdgeConfidenceTier
+			}
+			const neighbours: Neighbour[] = []
+			if (direction === 'in' || direction === 'both') {
+				const rows = callersStmt.all(item.symbolName, item.fileId, minConfidence) as Neighbour[]
+				neighbours.push(...rows)
+			}
+			if (direction === 'out' || direction === 'both') {
+				const rows = calleesStmt.all(item.symbolId, minConfidence) as Neighbour[]
+				neighbours.push(...rows)
+			}
+
+			for (const n of neighbours) {
+				if (visited.has(n.id)) continue
+				visited.add(n.id)
+
+				const cost = n.name.length + n.path.length
+				if (tokens + cost > maxTokens) {
+					truncated = true
+					stopReason = 'maxTokens'
+					break
+				}
+				if (nodes.length >= maxNodes) {
+					truncated = true
+					stopReason = 'maxNodes'
+					break
+				}
+				tokens += cost
+				nodes.push({
+					name: n.name,
+					path: n.path,
+					line: n.line,
+					depth: item.depth + 1,
+					edgeConfidence: n.confidence,
+					edgeTier: n.tier,
+				})
+
+				if (item.depth + 1 < maxDepth) {
+					const nFileRow = this.stmts.getFileByPath.get(n.path) as { id: number } | undefined
+					queue.push({
+						symbolId: n.id,
+						symbolName: n.name,
+						symbolPath: n.path,
+						fileId: nFileRow?.id ?? 0,
+						depth: item.depth + 1,
+					})
+				}
+			}
+			if (truncated) break
+		}
+
+		if (!truncated && queue.length > 0) {
+			// Queue still had work but maxDepth filter kept us from emitting more.
+			stopReason = 'maxDepth'
+		}
+
+		return {
+			root: { name: rootSym.name, path: rootPath, line: opts.line },
+			nodes,
+			truncated,
+			stopReason,
+		}
+	}
+
+	/**
+	 * Produces a compact JSON snapshot of the current graph state suitable
+	 * for committing as a PR artefact or diffing against a later snapshot.
+	 *
+	 * The snapshot is intentionally schema-stable (see `GraphSnapshot.version`)
+	 * so older snapshots remain readable after schema migrations.
+	 */
+	snapshot(label: string): import('./types').GraphSnapshot {
+		const files = this.db
+			.prepare(
+				`SELECT f.id, f.path, f.language, f.pagerank, f.symbol_count
+				 FROM files f ORDER BY f.path ASC`,
+			)
+			.all() as Array<{
+			id: number
+			path: string
+			language: string
+			pagerank: number
+			symbol_count: number
+		}>
+
+		const filesOut: import('./types').GraphSnapshot['files'] = {}
+		const symbolsStmt = this.db.prepare(
+			`SELECT name, line FROM symbols WHERE file_id = ? ORDER BY line ASC, name ASC`,
+		)
+		for (const f of files) {
+			const syms = symbolsStmt.all(f.id) as Array<{ name: string; line: number }>
+			const payload = syms.map(s => `${s.name}:${String(s.line)}`).join('|')
+			const symbolsHash = hashBytesToHex(new TextEncoder().encode(payload))
+			filesOut[f.path] = {
+				language: f.language,
+				symbolCount: f.symbol_count,
+				pagerank: f.pagerank,
+				symbolsHash,
+			}
+		}
+
+		const topSymbols = (
+			this.db
+				.prepare(
+					`SELECT s.name, f.path, f.pagerank
+					 FROM symbols s JOIN files f ON s.file_id = f.id
+					 ORDER BY f.pagerank DESC, s.name ASC LIMIT 50`,
+				)
+				.all() as Array<{ name: string; path: string; pagerank: number }>
+		).map(r => ({ name: r.name, path: r.path, pagerank: r.pagerank }))
+
+		const counts = this.db
+			.prepare(
+				`SELECT
+					(SELECT COUNT(*) FROM files) AS files,
+					(SELECT COUNT(*) FROM symbols) AS symbols,
+					(SELECT COUNT(*) FROM calls) AS calls`,
+			)
+			.get() as { files: number; symbols: number; calls: number }
+
+		return {
+			version: 1,
+			label,
+			createdAt: Date.now(),
+			stats: counts,
+			files: filesOut,
+			topSymbols,
+		}
+	}
+
+	/**
+	 * Pure diff of two snapshots. Does not touch the DB — callers can
+	 * diff snapshots loaded from disk across commits/branches.
+	 */
+	static diffSnapshots(
+		a: import('./types').GraphSnapshot,
+		b: import('./types').GraphSnapshot,
+	): import('./types').GraphSnapshotDiff {
+		const aFiles = new Set(Object.keys(a.files))
+		const bFiles = new Set(Object.keys(b.files))
+
+		const added: string[] = []
+		const removed: string[] = []
+		const changed: string[] = []
+		for (const p of bFiles) if (!aFiles.has(p)) added.push(p)
+		for (const p of aFiles) if (!bFiles.has(p)) removed.push(p)
+		for (const p of bFiles) {
+			if (!aFiles.has(p)) continue
+			if (a.files[p].symbolsHash !== b.files[p].symbolsHash) changed.push(p)
+		}
+		added.sort()
+		removed.sort()
+		changed.sort()
+
+		const aSym = new Map<string, number>()
+		for (const s of a.topSymbols) aSym.set(`${s.path}::${s.name}`, s.pagerank)
+		const bSym = new Map<string, number>()
+		for (const s of b.topSymbols) bSym.set(`${s.path}::${s.name}`, s.pagerank)
+
+		const allKeys = new Set<string>([...aSym.keys(), ...bSym.keys()])
+		const topSymbolsDelta: import('./types').GraphSnapshotDiff['topSymbolsDelta'] = []
+		for (const key of allKeys) {
+			const pa = aSym.get(key) ?? null
+			const pb = bSym.get(key) ?? null
+			const delta = (pb ?? 0) - (pa ?? 0)
+			if (pa === pb) continue
+			const [path, name] = key.split('::')
+			topSymbolsDelta.push({ name, path, pagerankA: pa, pagerankB: pb, delta })
+		}
+		topSymbolsDelta.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta))
+
+		return {
+			labelA: a.label,
+			labelB: b.label,
+			files: { added, removed, changed },
+			stats: {
+				filesDelta: b.stats.files - a.stats.files,
+				symbolsDelta: b.stats.symbols - a.stats.symbols,
+				callsDelta: b.stats.calls - a.stats.calls,
+			},
+			topSymbolsDelta: topSymbolsDelta.slice(0, 25),
+		}
+	}
+
+	/**
+	 * Loads all file-level edges into an adjacency list form and runs
+	 * community detection / bridge detection / surprise-edge analysis.
+	 * All three share the same in-memory edge list to avoid re-querying.
+	 */
+	getCommunityAnalysis(opts: { surprisePercentile?: number; maxIterations?: number } = {}): {
+		communities: import('./types').CommunityResult[]
+		bridges: import('./types').BridgeEdgeResult[]
+		surprises: import('./types').SurpriseEdgeResult[]
+	} {
+		const rows = this.db
+			.prepare(
+				`SELECT sf.path AS source, tf.path AS target, e.weight AS weight
+				 FROM edges e
+				 JOIN files sf ON e.source_file_id = sf.id
+				 JOIN files tf ON e.target_file_id = tf.id`,
+			)
+			.all() as Array<{ source: string; target: string; weight: number }>
+
+		const { assignment, communities } = detectCommunities(rows, {
+			maxIterations: opts.maxIterations,
+		})
+		const bridges = detectBridges(rows)
+		const surprises = detectSurpriseEdges(rows, assignment, {
+			percentile: opts.surprisePercentile,
+		})
+		return { communities, bridges, surprises }
+	}
+
+	/** Convenience: communities only (no bridges/surprises). */
+	getCommunities(maxIterations?: number): import('./types').CommunityResult[] {
+		return this.getCommunityAnalysis({ maxIterations }).communities
+	}
+
+	/** Convenience: bridge edges only. */
+	getBridges(): import('./types').BridgeEdgeResult[] {
+		return this.getCommunityAnalysis().bridges
+	}
+
+	/** Convenience: surprise cross-community edges only. */
+	getSurpriseEdges(percentile?: number): import('./types').SurpriseEdgeResult[] {
+		return this.getCommunityAnalysis({ surprisePercentile: percentile }).surprises
+	}
+
+	/**
+	 * Heuristically picks "entry-point" symbols and walks the outgoing
+	 * call graph from each one to produce an ordered execution flow.
+	 *
+	 * Entry-point kinds:
+	 *   - `main`    — symbol named `main` or `run`
+	 *   - `test`    — any symbol defined in a `*.test.*` / `*.spec.*` file
+	 *   - `handler` — symbols whose name matches handler-ish patterns
+	 *                 (`handle*`, `*Handler`, `GET/POST/PUT/DELETE`, `route*`)
+	 *   - `export`  — exported functions (fallback when nothing else matches)
+	 *
+	 * Flows are sorted by the entry's file PageRank descending, so the
+	 * most "load-bearing" flows surface first.
+	 */
+	getExecutionFlows(opts: { maxDepth?: number; maxFlows?: number } = {}): import('./types').ExecutionFlow[] {
+		const maxDepth = Math.max(1, opts.maxDepth ?? 4)
+		const maxFlows = Math.max(1, opts.maxFlows ?? 25)
+
+		// Pull candidate entry points in one query. We classify inline.
+		const rows = this.db
+			.prepare(
+				`SELECT s.id, s.name, s.line, s.is_exported, s.kind, f.id AS file_id, f.path, f.pagerank,
+				       (f.path LIKE '%.test.%' OR f.path LIKE '%_test.%' OR f.path LIKE '%.spec.%') AS is_test
+				 FROM symbols s JOIN files f ON s.file_id = f.id
+				 WHERE s.kind IN ('function', 'method')`,
+			)
+			.all() as Array<{
+			id: number
+			name: string
+			line: number
+			is_exported: number
+			kind: string
+			file_id: number
+			path: string
+			pagerank: number
+			is_test: number
+		}>
+
+		const handlerRe = /^(handle[A-Z_]|route|get|post|put|delete|patch)/i
+		const isHandler = (name: string) => handlerRe.test(name) || name.endsWith('Handler')
+
+		interface Candidate {
+			id: number
+			name: string
+			path: string
+			line: number
+			kind: 'main' | 'test' | 'handler' | 'export'
+			weight: number
+		}
+		const candidates: Candidate[] = []
+		for (const r of rows) {
+			let kind: Candidate['kind'] | null = null
+			if (r.name === 'main' || r.name === 'run') kind = 'main'
+			else if (r.is_test) kind = 'test'
+			else if (isHandler(r.name)) kind = 'handler'
+			else if (r.is_exported) kind = 'export'
+			if (!kind) continue
+			candidates.push({
+				id: r.id,
+				name: r.name,
+				path: r.path,
+				line: r.line,
+				kind,
+				weight: r.pagerank,
+			})
+		}
+		// Order by (weight desc, kind priority, name) for deterministic output.
+		const kindPriority: Record<Candidate['kind'], number> = { main: 0, handler: 1, test: 2, export: 3 }
+		candidates.sort((a, b) => {
+			if (b.weight !== a.weight) return b.weight - a.weight
+			if (kindPriority[a.kind] !== kindPriority[b.kind]) return kindPriority[a.kind] - kindPriority[b.kind]
+			return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+		})
+
+		const calleesStmt = this.db.prepare(
+			`SELECT s2.id, s2.name, s2.line, f2.path
+			 FROM calls c
+			 JOIN symbols s2 ON c.callee_symbol_id = s2.id
+			 JOIN files f2 ON s2.file_id = f2.id
+			 WHERE c.caller_symbol_id = ? AND c.confidence >= 0.7`,
+		)
+
+		const flows: import('./types').ExecutionFlow[] = []
+		for (const c of candidates.slice(0, maxFlows)) {
+			const visited = new Set<number>([c.id])
+			const steps: import('./types').ExecutionFlow['steps'] = [
+				{ depth: 0, name: c.name, path: c.path, line: c.line },
+			]
+			const queue: Array<{ id: number; depth: number }> = [{ id: c.id, depth: 0 }]
+			let truncated = false
+			while (queue.length > 0) {
+				const head = queue.shift()!
+				if (head.depth >= maxDepth) {
+					truncated = true
+					continue
+				}
+				const nexts = calleesStmt.all(head.id) as Array<{
+					id: number
+					name: string
+					line: number
+					path: string
+				}>
+				for (const n of nexts) {
+					if (visited.has(n.id)) continue
+					visited.add(n.id)
+					steps.push({ depth: head.depth + 1, name: n.name, path: n.path, line: n.line })
+					queue.push({ id: n.id, depth: head.depth + 1 })
+				}
+			}
+			flows.push({
+				entryName: c.name,
+				entryPath: c.path,
+				entryLine: c.line,
+				entryKind: c.kind,
+				weight: c.weight,
+				steps,
+				truncated,
+			})
+		}
+		return flows
+	}
+
+	/**
+	 * Returns high-PageRank symbols that are not covered by any test
+	 * file — candidates for writing new tests. Heuristic:
+	 *   1. Take all symbols whose file PageRank is at or above the `percentile`
+	 *      cutoff (default p90) of the PageRank distribution across files
+	 *      with at least one symbol.
+	 *   2. Drop any symbol that is transitively called from a test file.
+	 *   3. Sort by `pagerank desc, nonTestCallers desc`.
+	 */
+	getKnowledgeGaps(opts: { percentile?: number; limit?: number } = {}): import('./types').KnowledgeGapResult[] {
+		const percentile = Math.min(Math.max(opts.percentile ?? 0.9, 0), 1)
+		const limit = Math.max(1, opts.limit ?? 25)
+
+		const ranks = (
+			this.db.prepare('SELECT pagerank FROM files WHERE symbol_count > 0').all() as Array<{
+				pagerank: number
+			}>
+		).map(r => r.pagerank)
+		if (ranks.length === 0) return []
+		ranks.sort((a, b) => a - b)
+		const idx = Math.min(ranks.length - 1, Math.floor(ranks.length * percentile))
+		const cutoff = ranks[idx]
+
+		const hotSymbols = this.db
+			.prepare(
+				`SELECT s.id, s.name, s.line, f.path, f.pagerank
+				 FROM symbols s JOIN files f ON s.file_id = f.id
+				 WHERE f.pagerank >= ? AND s.kind IN ('function', 'method')`,
+			)
+			.all(cutoff) as Array<{ id: number; name: string; line: number; path: string; pagerank: number }>
+
+		if (hotSymbols.length === 0) return []
+
+		// For each hot symbol, count callers and whether any caller lives
+		// in a test file. One query is cheaper than per-symbol lookups.
+		const ids = hotSymbols.map(s => s.id)
+		const placeholders = ids.map(() => '?').join(',')
+		const callerRows = this.db
+			.prepare(
+				`SELECT c.callee_symbol_id AS callee_id, f.path AS caller_path
+				 FROM calls c
+				 JOIN symbols cs ON c.caller_symbol_id = cs.id
+				 JOIN files f ON cs.file_id = f.id
+				 WHERE c.callee_symbol_id IN (${placeholders}) AND c.confidence >= 0.7`,
+			)
+			.all(...ids) as Array<{ callee_id: number; caller_path: string }>
+
+		const testRe = /\.test\.|_test\.|\.spec\./
+		const totalByCallee = new Map<number, number>()
+		const testedCallees = new Set<number>()
+		for (const row of callerRows) {
+			totalByCallee.set(row.callee_id, (totalByCallee.get(row.callee_id) ?? 0) + 1)
+			if (testRe.test(row.caller_path)) testedCallees.add(row.callee_id)
+		}
+
+		const gaps: import('./types').KnowledgeGapResult[] = []
+		for (const s of hotSymbols) {
+			if (testedCallees.has(s.id)) continue
+			gaps.push({
+				name: s.name,
+				path: s.path,
+				line: s.line,
+				pagerank: s.pagerank,
+				nonTestCallers: totalByCallee.get(s.id) ?? 0,
+			})
+		}
+		gaps.sort((a, b) => {
+			if (b.pagerank !== a.pagerank) return b.pagerank - a.pagerank
+			return b.nonTestCallers - a.nonTestCallers
+		})
+		return gaps.slice(0, limit)
 	}
 
 	getUnusedExports(limit = 50): UnusedExportResult[] {
@@ -1486,6 +2031,174 @@ export class RepoMap {
 		return results.slice(0, limit)
 	}
 
+	/**
+	 * Symbol-level blast radius — BFS through call edges from a given symbol.
+	 * Returns all symbols that are transitively reachable as callers.
+	 */
+	getSymbolBlastRadius(name: string, maxDepth = 5): SymbolBlastRadiusResult {
+		// Find the root symbol(s)
+		const roots = this.stmts.getSymbolsByName.all(name) as Array<{
+			id: number
+			name: string
+			line: number
+			file_id: number
+		}>
+		if (roots.length === 0) {
+			return { root: { name, path: '', line: 0 }, affected: [], totalAffected: 0 }
+		}
+
+		const root = roots[0]
+		const rootFile = this.stmts.getFileById.get(root.file_id) as { path: string } | undefined
+
+		const visited = new Set<number>()
+		visited.add(root.id)
+
+		interface QueueItem {
+			symbolId: number
+			depth: number
+		}
+		const queue: QueueItem[] = [{ symbolId: root.id, depth: 0 }]
+		const affected: SymbolBlastRadiusResult['affected'] = []
+
+		while (queue.length > 0) {
+			const item = queue.shift()!
+			if (item.depth >= maxDepth) continue
+
+			// Find callers of this symbol
+			const sym = this.db.prepare('SELECT name FROM symbols WHERE id = ?').get(item.symbolId) as
+				| { name: string }
+				| undefined
+			if (!sym) continue
+
+			const callers = this.db
+				.prepare(
+					`SELECT s.id, s.name, s.line, f.path
+					 FROM calls c
+					 JOIN symbols s ON c.caller_symbol_id = s.id
+					 JOIN files f ON s.file_id = f.id
+					 WHERE c.callee_name = ?`,
+				)
+				.all(sym.name) as Array<{ id: number; name: string; line: number; path: string }>
+
+			for (const caller of callers) {
+				if (visited.has(caller.id)) continue
+				visited.add(caller.id)
+				affected.push({
+					name: caller.name,
+					path: caller.path,
+					line: caller.line,
+					depth: item.depth + 1,
+				})
+				queue.push({ symbolId: caller.id, depth: item.depth + 1 })
+			}
+		}
+
+		return {
+			root: { name: root.name, path: rootFile?.path ?? '', line: root.line },
+			affected,
+			totalAffected: affected.length,
+		}
+	}
+
+	/**
+	 * Detect cycles in the call graph (symbol-level).
+	 * Uses iterative DFS with back-edge detection.
+	 */
+	getCallGraphCycles(limit = 20): CallGraphCycleResult[] {
+		// Get all symbols that participate in calls
+		const allCallers = this.db
+			.prepare(
+				`SELECT DISTINCT s.id, s.name, s.line, f.path
+				 FROM calls c
+				 JOIN symbols s ON c.caller_symbol_id = s.id
+				 JOIN files f ON s.file_id = f.id`,
+			)
+			.all() as Array<{ id: number; name: string; line: number; path: string }>
+
+		// Build adjacency list: caller → callees
+		const adj = new Map<number, number[]>()
+		const symbolInfo = new Map<number, { name: string; path: string; line: number }>()
+
+		for (const s of allCallers) {
+			symbolInfo.set(s.id, { name: s.name, path: s.path, line: s.line })
+		}
+
+		const allEdges = this.db
+			.prepare(
+				`SELECT c.caller_symbol_id, cs.id as callee_id
+				 FROM calls c
+				 JOIN symbols cs ON c.callee_name = cs.name AND c.callee_file_id = cs.file_id
+				 WHERE c.caller_symbol_id IS NOT NULL AND cs.id IS NOT NULL`,
+			)
+			.all() as Array<{ caller_symbol_id: number; callee_id: number }>
+
+		for (const edge of allEdges) {
+			let arr = adj.get(edge.caller_symbol_id)
+			if (!arr) {
+				arr = []
+				adj.set(edge.caller_symbol_id, arr)
+			}
+			arr.push(edge.callee_id)
+			// Ensure callee info is populated
+			if (!symbolInfo.has(edge.callee_id)) {
+				const info = this.db
+					.prepare(
+						'SELECT s.name, s.line, f.path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.id = ?',
+					)
+					.get(edge.callee_id) as { name: string; line: number; path: string } | undefined
+				if (info) symbolInfo.set(edge.callee_id, info)
+			}
+		}
+
+		const cycles: CallGraphCycleResult[] = []
+		const visited = new Set<number>()
+		const onStack = new Set<number>()
+
+		for (const startId of adj.keys()) {
+			if (visited.has(startId) || cycles.length >= limit) break
+			// Iterative DFS
+			const stack: Array<{ id: number; path: number[] }> = [{ id: startId, path: [] }]
+			const localVisited = new Set<number>()
+
+			while (stack.length > 0 && cycles.length < limit) {
+				const { id, path } = stack.pop()!
+
+				if (onStack.has(id)) {
+					// Found a cycle — extract it from path
+					const cycleStart = path.indexOf(id)
+					if (cycleStart >= 0) {
+						const cyclePath = path.slice(cycleStart).concat(id)
+						const cycleEntries = cyclePath
+							.map(sid => symbolInfo.get(sid))
+							.filter((x): x is { name: string; path: string; line: number } => !!x)
+						if (cycleEntries.length >= 2) {
+							cycles.push({ cycle: cycleEntries, length: cycleEntries.length })
+						}
+					}
+					continue
+				}
+
+				if (localVisited.has(id)) continue
+				localVisited.add(id)
+				onStack.add(id)
+				visited.add(id)
+
+				const newPath = [...path, id]
+				const neighbors = adj.get(id) ?? []
+				for (const next of neighbors) {
+					stack.push({ id: next, path: newPath })
+				}
+			}
+
+			// Clear onStack for next component
+			for (const id of localVisited) {
+				onStack.delete(id)
+			}
+		}
+
+		return cycles
+	}
+
 	async onFileChanged(path: string): Promise<{ status: string }> {
 		const absPath = resolve(path)
 		const relPath = relative(this.cwd, absPath)
@@ -1697,12 +2410,19 @@ export class RepoMap {
 							const calleeRow = this.stmts.resolveCallee.get(imp.sourceFileId, imp.name) as
 								| { id: number }
 								| undefined
+							// EXTRACTED when we resolved the callee to a concrete exported
+							// symbol; INFERRED when only the source file is known (re-export
+							// chain or missing export).
+							const tier = calleeRow ? 'EXTRACTED' : 'INFERRED'
+							const confidence = calleeRow ? 1.0 : 0.7
 							this.stmts.insertCall.run(
 								func.id,
 								imp.name,
 								calleeRow?.id ?? null,
 								imp.sourceFileId,
 								callLine,
+								confidence,
+								tier,
 							)
 						}
 					}

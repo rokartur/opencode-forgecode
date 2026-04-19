@@ -6,7 +6,7 @@ import { initializeDatabase, closeDatabase } from '../src/storage'
 import {
 	readGraphStatus,
 	formatGraphStatus,
-	getDbPathForDataDir,
+	_getDbPathForDataDir,
 	isTransient,
 	waitForGraphReady,
 } from '../src/utils/tui-graph-status'
@@ -15,7 +15,7 @@ import type { GraphStatusPayload } from '../src/utils/graph-status-store'
 
 const TEST_DIR = '/tmp/opencode-tui-graph-status-test-' + Date.now()
 
-function createTestLogger() {
+function _createTestLogger() {
 	return {
 		log: () => {},
 		error: () => {},

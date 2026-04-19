@@ -9,7 +9,7 @@ import { encodeFrame } from '../src/graph/ipc-framing'
 import net from 'net'
 import { EventEmitter } from 'events'
 
-function makeSocketPath(): string {
+function _makeSocketPath(): string {
 	const dir = mkdtempSync(join(tmpdir(), 'ipc-transport-'))
 	return { dir, path: join(dir, 'sock') } as unknown as string & { dir: string; path: string }
 }
