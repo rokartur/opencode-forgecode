@@ -244,7 +244,7 @@ describe('SandboxManager', () => {
 				logger,
 			)
 
-			const result = await manager.start('test', '/path')
+			const _result = await manager.start('test', '/path')
 
 			expect(mockDocker.getCreateContainerCalls().length).toBe(1)
 			expect(manager.isActive('test')).toBe(true)

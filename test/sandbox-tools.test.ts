@@ -1,7 +1,5 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach } from 'bun:test'
 import { createSandboxToolBeforeHook, createSandboxToolAfterHook } from '../src/hooks/sandbox-tools'
-import type { createLoopService } from '../src/services/loop'
-import type { createSandboxManager } from '../src/sandbox/manager'
 import type { Logger } from '../src/types'
 
 interface MockSandboxContext {
