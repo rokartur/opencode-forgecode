@@ -318,6 +318,175 @@ describe('plan-read', () => {
 	})
 })
 
+describe('plan-write size limit', () => {
+	let db: Database
+	let kvService: ReturnType<typeof createKvService>
+	let tools: ReturnType<typeof createPlanTools>
+
+	beforeEach(() => {
+		db = createTestDb()
+		kvService = createKvService(db, mockLogger)
+		tools = createPlanTools({
+			kvService,
+			projectId: 'test-project',
+			logger: mockLogger,
+			loopService: { resolveLoopName: () => null } as any,
+		} as any)
+	})
+
+	afterEach(() => {
+		db.close()
+	})
+
+	test('rejects oversized plan-write with guidance', async () => {
+		const huge = 'x'.repeat(8_001)
+		const result = await tools['plan-write'].execute({ content: huge }, {
+			sessionID: 'test-session',
+		} as any)
+
+		expect(result).toContain('Error')
+		expect(result).toContain('plan-append')
+		// Nothing should have been stored
+		expect(kvService.get('test-project', 'plan:test-session')).toBeNull()
+	})
+})
+
+describe('plan-append', () => {
+	let db: Database
+	let kvService: ReturnType<typeof createKvService>
+	let tools: ReturnType<typeof createPlanTools>
+
+	beforeEach(() => {
+		db = createTestDb()
+		kvService = createKvService(db, mockLogger)
+		tools = createPlanTools({
+			kvService,
+			projectId: 'test-project',
+			logger: mockLogger,
+			loopService: { resolveLoopName: () => null } as any,
+		} as any)
+	})
+
+	afterEach(() => {
+		db.close()
+	})
+
+	test('creates plan when none exists', async () => {
+		const result = await tools['plan-append'].execute(
+			{ content: '# Plan\n\nFirst section' },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		expect(result).toContain('Plan appended')
+		const stored = kvService.get<string>('test-project', 'plan:test-session')
+		expect(stored).toBe('# Plan\n\nFirst section')
+	})
+
+	test('appends to existing plan preserving separator', async () => {
+		kvService.set('test-project', 'plan:test-session', '# Plan\n\n## Phase 1\n- item\n')
+
+		await tools['plan-append'].execute(
+			{ content: '- item 2\n' },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		const stored = kvService.get<string>('test-project', 'plan:test-session')
+		expect(stored).toBe('# Plan\n\n## Phase 1\n- item\n- item 2\n')
+	})
+
+	test('inserts section heading when section arg is provided', async () => {
+		kvService.set('test-project', 'plan:test-session', '# Plan\n')
+
+		await tools['plan-append'].execute(
+			{ section: 'Verification', content: '- run tests' },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		const stored = kvService.get<string>('test-project', 'plan:test-session')
+		expect(stored).toBe('# Plan\n\n\n## Verification\n- run tests')
+	})
+
+	test('rejects oversized append with guidance', async () => {
+		const huge = 'x'.repeat(8_001)
+		const result = await tools['plan-append'].execute(
+			{ content: huge },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		expect(result).toContain('Error')
+		expect(result).toContain('plan-append')
+		expect(kvService.get('test-project', 'plan:test-session')).toBeNull()
+	})
+})
+
+describe('plan-edit advanced', () => {
+	let db: Database
+	let kvService: ReturnType<typeof createKvService>
+	let tools: ReturnType<typeof createPlanTools>
+
+	beforeEach(() => {
+		db = createTestDb()
+		kvService = createKvService(db, mockLogger)
+		tools = createPlanTools({
+			kvService,
+			projectId: 'test-project',
+			logger: mockLogger,
+			loopService: { resolveLoopName: () => null } as any,
+		} as any)
+
+		kvService.set('test-project', 'plan:test-session', '# Plan\n- Item 1\n- Item 1\n- Item 1\n')
+	})
+
+	afterEach(() => {
+		db.close()
+	})
+
+	test('replace_all replaces every occurrence', async () => {
+		const result = await tools['plan-edit'].execute(
+			{ old_string: '- Item 1', new_string: '- Done', replace_all: true },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		expect(result).toContain('3 replacements')
+		const stored = kvService.get<string>('test-project', 'plan:test-session')
+		expect(stored).toBe('# Plan\n- Done\n- Done\n- Done\n')
+	})
+
+	test('occurrence targets a specific match', async () => {
+		const result = await tools['plan-edit'].execute(
+			{ old_string: '- Item 1', new_string: '- Second', occurrence: 2 },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		expect(result).toContain('1 replacement')
+		const stored = kvService.get<string>('test-project', 'plan:test-session')
+		expect(stored).toBe('# Plan\n- Item 1\n- Second\n- Item 1\n')
+	})
+
+	test('occurrence out of range returns error', async () => {
+		const result = await tools['plan-edit'].execute(
+			{ old_string: '- Item 1', new_string: '- x', occurrence: 9 },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		expect(result).toContain('out of range')
+		// Unchanged
+		const stored = kvService.get<string>('test-project', 'plan:test-session')
+		expect(stored).toBe('# Plan\n- Item 1\n- Item 1\n- Item 1\n')
+	})
+
+	test('non-unique old_string without disambiguation suggests options', async () => {
+		const result = await tools['plan-edit'].execute(
+			{ old_string: '- Item 1', new_string: '- x' },
+			{ sessionID: 'test-session' } as any,
+		)
+
+		expect(result).toContain('found 3 times')
+		expect(result).toContain('replace_all')
+		expect(result).toContain('occurrence')
+	})
+})
+
 describe('plan-read with loop session', () => {
 	let db: Database
 	let kvService: ReturnType<typeof createKvService>

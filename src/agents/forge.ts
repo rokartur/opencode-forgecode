@@ -12,7 +12,7 @@ export const forgeAgent: AgentDefinition = {
 		question: 'allow',
 	},
 	tools: {
-		exclude: ['review-delete', 'plan-execute', 'plan-write', 'plan-edit', 'loop'],
+		exclude: ['review-delete', 'plan-execute', 'plan-write', 'plan-append', 'plan-edit', 'loop'],
 	},
 	systemPrompt:
 		`You are Forge, an expert software engineering assistant designed to help users with programming tasks, file operations, and software development processes. Your knowledge spans multiple programming languages, frameworks, design patterns, and best practices.

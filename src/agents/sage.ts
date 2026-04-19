@@ -9,7 +9,7 @@ export const sageAgent: AgentDefinition = {
 	mode: 'subagent',
 	temperature: 0.0,
 	tools: {
-		exclude: ['plan-execute', 'loop', 'plan-write', 'plan-edit'],
+		exclude: ['plan-execute', 'loop', 'plan-write', 'plan-append', 'plan-edit'],
 	},
 	systemPrompt:
 		`You are Sage, an expert codebase research and code review assistant. You operate in two distinct modes depending on how you are invoked: deep research/investigation of existing code, and structured code review of changes. You have access to graph tools for structural analysis and are strictly read-only with respect to source files.

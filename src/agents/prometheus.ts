@@ -11,7 +11,7 @@ export const prometheusAgent: AgentDefinition = {
 	temperature: 0.3,
 	toolSupported: true,
 	tools: {
-		exclude: ['plan-execute', 'plan-write', 'plan-edit', 'loop', 'review-write', 'review-delete'],
+		exclude: ['plan-execute', 'plan-write', 'plan-append', 'plan-edit', 'loop', 'review-write', 'review-delete'],
 	},
 	systemPrompt:
 		`You are Prometheus, a code generation agent specialising in scaffolding, boilerplate, and migrations. You create new code quickly with less auditing overhead than the primary agent.

@@ -102,8 +102,9 @@ Agents can call each other via `bg_spawn` (Sisyphus-style delegation) or the `to
 
 | Tool            | Description                                                |
 | --------------- | ---------------------------------------------------------- |
-| `plan-write`    | Store a plan (auto-keyed to `plan:{sessionID}`, 7-day TTL) |
-| `plan-edit`     | Find-and-replace within the stored plan                    |
+| `plan-write`    | Store a plan skeleton (auto-keyed to `plan:{sessionID}`, 7-day TTL, 8 KB soft cap) |
+| `plan-append`   | Append a section to the stored plan (for incremental, timeout-safe writes) |
+| `plan-edit`     | Find-and-replace within the stored plan (supports `replace_all` / `occurrence`) |
 | `plan-read`     | Retrieve plan with pagination and pattern search           |
 | `plan-execute`  | Launch plan execution as a new forge session               |
 | `review-write`  | Store review findings (file, line, severity, description)  |

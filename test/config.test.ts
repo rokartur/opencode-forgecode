@@ -52,6 +52,7 @@ describe('createConfigHandler', () => {
 
 			const prompt = explore.prompt as string
 			expect(prompt).not.toContain('plan-write')
+			expect(prompt).not.toContain('plan-append')
 			expect(prompt).not.toContain('plan-edit')
 			expect(prompt).not.toContain('plan-read')
 			expect(prompt).not.toContain('READ-ONLY mode')
