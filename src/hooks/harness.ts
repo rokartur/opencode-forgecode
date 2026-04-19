@@ -27,6 +27,9 @@ import {
 
 const MUTATING_TOOLS = new Set(['write', 'edit', 'multi_patch', 'patch'])
 
+/** Cap on any callback into opencode (TUI append) — prevents hook from ever blocking a tool call. */
+const APPEND_PROMPT_TIMEOUT_MS = 2_000
+
 const DEFAULT_CONFIG: Required<Omit<HarnessConfig, 'truncation'>> & {
 	truncation: Required<NonNullable<HarnessConfig['truncation']>>
 } = {
@@ -123,9 +126,13 @@ export function createHarnessHooks(deps: HarnessHookDeps): HarnessHooks {
 				logger.log(`harness: doom-loop detected (${reps}x) for session ${sessionID}`)
 				if (deps.appendPrompt) {
 					try {
-						await deps.appendPrompt(sessionID, text)
+						await withTimeout(
+							Promise.resolve(deps.appendPrompt(sessionID, text)),
+							APPEND_PROMPT_TIMEOUT_MS,
+							'appendPrompt',
+						)
 					} catch (err) {
-						logger.debug('harness: appendPrompt failed', err)
+						logger.debug('harness: appendPrompt failed or timed out', err)
 					}
 				}
 			}
@@ -152,10 +159,14 @@ export function createHarnessHooks(deps: HarnessHookDeps): HarnessHooks {
 					const reminder = await todos.buildReminder(sessionId)
 					if (reminder && deps.appendPrompt) {
 						try {
-							await deps.appendPrompt(sessionId, reminder)
+							await withTimeout(
+								Promise.resolve(deps.appendPrompt(sessionId, reminder)),
+								APPEND_PROMPT_TIMEOUT_MS,
+								'appendPrompt',
+							)
 							logger.log(`harness: pending-todos reminder sent for ${sessionId}`)
 						} catch (err) {
-							logger.debug('harness: appendPrompt pending-todos failed', err)
+							logger.debug('harness: appendPrompt pending-todos failed or timed out', err)
 						}
 					}
 				}
@@ -228,6 +239,25 @@ function extractPath(args: unknown): string | null {
 	const r = args as Record<string, unknown>
 	const path = r.filePath ?? r.path ?? r.file
 	return typeof path === 'string' ? path : null
+}
+
+/**
+ * Race a promise against a timeout. Rejects with a descriptive Error if the
+ * promise does not settle within `ms`. Used to cap any callback into opencode
+ * (e.g. `client.tui.appendPrompt`) so a hung host can never block a tool call.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | null = null
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<T>((_, reject) => {
+				timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+			}),
+		])
+	} finally {
+		if (timer) clearTimeout(timer)
+	}
 }
 
 /** Stable hash for request-args used in metrics/logs (unused by runtime). */

@@ -85,7 +85,9 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 							planText,
 						})
 
-						ctx.v2.session.abort({ sessionID: input.sessionID }).catch(err => {
+						// Abort muse BEFORE returning so no follow-up tool calls fire against the
+						// dying session (which would surface as "Tool execution aborted").
+						await ctx.v2.session.abort({ sessionID: input.sessionID }).catch(err => {
 							logger.error('Plan approval: failed to abort architect session', err)
 						})
 
@@ -110,6 +112,13 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 						logger.log('Plan approval: "New session" — creating new session')
 
 						const executionModel = parseModelString(config.executionModel)
+
+						// Stop muse before kicking off the new-session dispatch. If muse has a
+						// tool already in flight, waiting for abort to settle prevents the
+						// "Tool execution aborted" flash in the TUI.
+						await v2.session.abort({ sessionID: input.sessionID }).catch(err => {
+							logger.error('Plan approval: failed to abort architect session', err)
+						})
 
 						v2.session
 							.create({ title, directory: ctx.directory })
@@ -161,10 +170,6 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 								logger.error('Plan approval: failed to create new session', err)
 								output.output = 'Creating new session for plan execution... Failed to create session.'
 							})
-
-						v2.session.abort({ sessionID: input.sessionID }).catch(err => {
-							logger.error('Plan approval: failed to abort architect session', err)
-						})
 						return
 					}
 
@@ -188,6 +193,12 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 						const executionModel = config.loop?.model ?? config.executionModel
 						const auditorModel = config.auditorModel ?? config.loop?.model ?? config.executionModel
 
+						// Stop muse before starting the loop so no in-flight tool is cancelled
+						// mid-execution (would surface as "Tool execution aborted").
+						await v2.session.abort({ sessionID: input.sessionID }).catch(err => {
+							logger.error('Plan approval: failed to abort architect session', err)
+						})
+
 						setupLoop(ctx, {
 							prompt: planText,
 							sessionTitle: `Loop: ${title}`,
@@ -203,10 +214,6 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 							onLoopStarted: id => ctx.loopHandler.startWatchdog(id),
 						}).catch(err => {
 							logger.error('Plan approval: failed to start loop', err)
-						})
-
-						v2.session.abort({ sessionID: input.sessionID }).catch(err => {
-							logger.error('Plan approval: failed to abort architect session', err)
 						})
 						return
 					}

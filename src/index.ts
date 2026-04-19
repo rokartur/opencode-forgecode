@@ -43,6 +43,7 @@ import { BackgroundSpawner } from './runtime/background/spawner'
 import { ensureRtkInstalled } from './runtime/rtk'
 import { createRtkGuidanceHooks } from './hooks/rtk-guidance'
 import { createCommentCheckerHooks } from './hooks/comment-checker'
+import { createSessionRetryHooks } from './hooks/session-retry'
 
 /**
  * Creates an OpenCode plugin instance with loop management, graph indexing, and sandboxing.
@@ -436,6 +437,12 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 		const toolExecuteBeforeHook = createToolExecuteBeforeHook(ctx)
 		const toolExecuteAfterHook = createToolExecuteAfterHook(ctx)
 		const planApprovalEventHook = createPlanApprovalEventHook(ctx)
+		const sessionRetryHooks = createSessionRetryHooks({
+			loopService,
+			v2,
+			directory,
+			logger,
+		})
 		const sandboxBeforeHook = createSandboxToolBeforeHook({
 			loopService,
 			sandboxManager,
@@ -506,6 +513,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 				await harnessHooks.onEvent(eventInput)
 				await planApprovalEventHook(eventInput)
 				await graphCommandHook(eventInput)
+				await sessionRetryHooks.onEvent(eventInput)
 			},
 			'tool.execute.before': async (input, output) => {
 				const loopName = loopService.resolveLoopName(input.sessionID)
@@ -599,6 +607,8 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 
 				// Intent routing hint (advisory, non-blocking)
 				intentHooks.onMessagesTransform(output)
+				// Session-retry hook: remember last user prompt for potential auto-retry on provider timeout
+				sessionRetryHooks.onMessagesTransform(output)
 				// User-prompt template injection
 				userPromptHooks.onMessagesTransform(output, { directory, projectId })
 

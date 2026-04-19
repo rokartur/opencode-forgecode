@@ -7,6 +7,14 @@ import { hashLine, parseAnchor } from '../utils/line-hash'
 
 const z = tool.schema
 
+/**
+ * Hard limit on the total bytes of `newContent` across all patches in a single
+ * call. Large tool-call payloads trigger provider stream timeouts ("Tool
+ * execution aborted" / "The operation timed out"). For large rewrites the
+ * model should use `edit` (targeted) or `write` (whole file) instead.
+ */
+const MAX_PATCH_PAYLOAD_BYTES = 32_000
+
 export function createPatchTools(ctx: ToolContext): Record<string, ReturnType<typeof tool>> {
 	const { directory, logger, config } = ctx
 	if (config.harness?.hashAnchoredPatch === false) {
@@ -16,7 +24,7 @@ export function createPatchTools(ctx: ToolContext): Record<string, ReturnType<ty
 	return {
 		patch: tool({
 			description:
-				'Apply hash-anchored line or range replacements atomically. Fails if any anchor hash does not match the current file.',
+				'Apply small, hash-anchored line or range replacements atomically. Use ONLY for targeted edits where `newContent` is short (a few lines). For rewriting a function body, moving large blocks, or inserting many lines, prefer `edit` (find/replace) or `write` (whole file). Large `newContent` payloads can trigger provider stream timeouts. Fails if any anchor hash does not match the current file.',
 			args: {
 				file: z.string().describe('Absolute or workspace-relative path to the file to patch.'),
 				patches: z
@@ -29,9 +37,16 @@ export function createPatchTools(ctx: ToolContext): Record<string, ReturnType<ty
 						}),
 					)
 					.min(1)
-					.describe('Ordered list of anchored replacements to apply.'),
+					.describe('Ordered list of anchored replacements to apply. Keep each newContent small.'),
 			},
 			execute: async args => {
+				// Reject oversized payloads up-front to steer the model toward `edit`/`write`
+				// instead of streaming a huge tool-call that the provider will time out on.
+				const totalBytes = args.patches.reduce((sum, p) => sum + Buffer.byteLength(p.newContent, 'utf8'), 0)
+				if (totalBytes > MAX_PATCH_PAYLOAD_BYTES) {
+					return `ERROR: patch payload too large (${totalBytes} bytes > ${MAX_PATCH_PAYLOAD_BYTES}). Use the \`edit\` tool for targeted find/replace, or \`write\` to rewrite the whole file.`
+				}
+
 				const absPath = args.file.startsWith('/') ? args.file : join(directory, args.file)
 
 				let originalContent: string
