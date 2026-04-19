@@ -1,6 +1,8 @@
 <div align="center">
 
-# ⚒️ opencode-forgecode
+<img width="216" height="215" alt="super-mega-logo" src="https://github.com/user-attachments/assets/0c87c0fb-ae81-4c33-a5cc-ddc49b799694" />
+
+# opencode-forgecode
 
 **The all-in-one OpenCode plugin for autonomous development workflows.**
 
