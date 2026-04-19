@@ -44,6 +44,7 @@ import { ensureRtkInstalled } from './runtime/rtk'
 import { createRtkGuidanceHooks } from './hooks/rtk-guidance'
 import { createCommentCheckerHooks } from './hooks/comment-checker'
 import { createSessionRetryHooks } from './hooks/session-retry'
+import { runAutoModelSetup } from './runtime/auto-model-setup'
 
 /**
  * Creates an OpenCode plugin instance with loop management, graph indexing, and sandboxing.
@@ -83,6 +84,11 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 		const caps = getCapabilityDescriptors()
 		const active = caps.filter(c => c.status === 'implemented').length
 		logger.log(`Capabilities: ${active}/${caps.length} active`)
+
+		// Auto-assign subagent models based on the user's connected providers.
+		// Runs only for agents without an explicit `model` in forge-config.jsonc
+		// and never fails plugin init. See src/runtime/auto-model-setup.ts.
+		await runAutoModelSetup(client, directory, config, logger)
 
 		// Fire-and-forget RTK installer. Never blocks plugin init.
 		void ensureRtkInstalled(logger, config.rtk).catch(err => {

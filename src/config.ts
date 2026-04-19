@@ -114,9 +114,15 @@ $ARGUMENTS`,
 	},
 }
 
+export interface AgentConfigOverride {
+	temperature?: number
+	/** `providerID/modelID` — becomes the agent's default model. */
+	model?: string
+}
+
 export function createConfigHandler(
 	agents: Record<AgentRole, AgentDefinition>,
-	agentOverrides?: Record<string, { temperature?: number }>,
+	agentOverrides?: Record<string, AgentConfigOverride>,
 ) {
 	return async (config: Record<string, unknown>) => {
 		const effectiveAgents = { ...agents }
@@ -126,7 +132,14 @@ export function createConfigHandler(
 					r => effectiveAgents[r as AgentRole].displayName === name,
 				) as AgentRole | undefined
 				if (role) {
-					effectiveAgents[role] = { ...effectiveAgents[role], ...overrides }
+					const { model, temperature } = overrides
+					effectiveAgents[role] = {
+						...effectiveAgents[role],
+						...(temperature !== undefined ? { temperature } : {}),
+						// Promote `model` override into the agent's defaultModel so it
+						// flows through to OpenCode's `config.agent[name].model`.
+						...(model ? { defaultModel: model } : {}),
+					}
 				}
 			}
 		}

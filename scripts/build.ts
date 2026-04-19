@@ -61,7 +61,22 @@ const workerResult = await Bun.build({
 	external: ['web-tree-sitter', 'tree-sitter-wasms', 'better-sqlite3'],
 })
 
-for (const result of [serverResult, tuiResult, workerResult]) {
+console.log('Bundling CLI...')
+const cliOutDir = join(distDir, 'cli')
+mkdirSync(cliOutDir, { recursive: true })
+const cliResult = await Bun.build({
+	entrypoints: [join(rootDir, 'src', 'cli', 'index.ts')],
+	outdir: cliOutDir,
+	target: 'node',
+	format: 'esm',
+	naming: 'index.js',
+	external: ['@opencode-ai/plugin', '@opencode-ai/sdk', '@opencode-ai/sdk/v2', 'better-sqlite3'],
+	define: {
+		__FORGECODE_VERSION_VALUE__: JSON.stringify(buildVersion),
+	},
+})
+
+for (const result of [serverResult, tuiResult, workerResult, cliResult]) {
 	if (!result.success) {
 		for (const log of result.logs) {
 			console.error(log)

@@ -116,6 +116,16 @@ const commands: Record<string, CommandModule> = {
 			help()
 		},
 	},
+	'setup-models': {
+		cli: async (args, globalOpts) => {
+			const { cli } = await import('./commands/setup-models')
+			await cli(args, globalOpts)
+		},
+		help: async () => {
+			const { help } = await import('./commands/setup-models')
+			help()
+		},
+	},
 	loop: {
 		cli: async (args, globalOpts) => {
 			const subcommandName = args[0]
@@ -163,6 +173,7 @@ Usage:
 Commands:
   upgrade         Check for and install plugin updates
   doctor          Run environment and config diagnostics
+  setup-models    Manage auto-assigned subagent models
   loop <command>  Manage iterative development loops
   graph <command> Check graph status or trigger a scan
 
