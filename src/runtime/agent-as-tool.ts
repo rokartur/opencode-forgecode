@@ -2,8 +2,20 @@
  * Agent-as-tool — auto-registers `agent_<name>` tools for each agent
  * with `toolSupported: true`.
  *
- * These tools delegate to the background spawner (if available) or
- * run inline via v2 session prompt (sync fallback).
+ * Supports conversational multi-turn interactions via `session_id`:
+ *   - First call (no session_id): creates a new child session, returns session_id.
+ *   - Follow-up calls (with session_id): continues the conversation in the
+ *     same session, preserving full context.
+ *
+ * Uses the official OpenCode v2 SDK APIs:
+ *   - session.create({ parentID }) for child session hierarchy
+ *   - session.prompt() (sync) for blocking agent calls — returns { info, parts } directly
+ *   - session.promptAsync() for background fire-and-forget
+ *   - session.messages() for fetching message history (continuation mode)
+ *   - session.status() for checking idle/busy state
+ *
+ * @see https://opencode.ai/docs/sdk
+ * @see https://opencode.ai/docs/agents
  */
 
 import { tool } from '@opencode-ai/plugin'
@@ -12,6 +24,9 @@ import type { ToolContext } from '../tools/types'
 import type { BackgroundSpawner } from '../runtime/background/spawner'
 
 const z = tool.schema
+
+/** Max chars to return from agent output. */
+const MAX_OUTPUT_CHARS = 8_000
 
 /**
  * Create agent-as-tool entries for all agents that declare `toolSupported: true`.
@@ -29,27 +44,55 @@ export function createAgentAsTools(
 	return tools
 }
 
+/**
+ * Extract text content from message parts using the OpenCode SDK format.
+ * Messages use `{ info: Message, parts: Part[] }` where Part has `.type` and `.text`.
+ * @see https://opencode.ai/docs/sdk — SessionMessagesResponse / SessionPromptResponse
+ */
+function extractPartsText(parts: Array<{ type: string; text?: string }>): string {
+	return parts
+		.filter(p => p.type === 'text' && p.text)
+		.map(p => p.text!)
+		.join('\n')
+}
+
 function createAgentTool(
 	role: string,
 	def: AgentDefinition,
 	ctx: ToolContext & { bgSpawner: BackgroundSpawner | null },
 ): ReturnType<typeof tool> {
 	return tool({
-		description: `Invoke the ${def.displayName} agent: ${def.description}`,
+		description:
+			`Invoke the ${def.displayName} agent: ${def.description}\n\n` +
+			'Supports multi-turn conversations: omit session_id for a new session, ' +
+			'or provide a session_id from a previous call to continue the conversation ' +
+			'with full context preserved.',
 		args: {
 			prompt: z.string().describe(`Instruction / question for the ${def.displayName} agent`),
-			context: z.string().optional().describe('Additional context to prepend to the prompt'),
+			context: z.string().optional().describe('Additional context to prepend to the prompt (first call only)'),
+			session_id: z
+				.string()
+				.optional()
+				.describe(
+					'Session ID from a previous invocation to continue the conversation. ' +
+						'Omit to start a new session.',
+				),
 			background: z
 				.boolean()
 				.optional()
 				.default(false)
 				.describe('Run in background (true) or wait for result (false)'),
 		},
-		execute: async args => {
+		execute: async (args, toolCtx) => {
 			const { bgSpawner, v2, directory, logger } = ctx
+			const parentSessionID = toolCtx.sessionID
 
+			// ── Background delegation ──────────────────────────────────
 			if (args.background && bgSpawner) {
-				// Background delegation
+				if (args.session_id) {
+					return continueBackgroundSession(v2, directory, role, args)
+				}
+
 				const id = `at-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 				const task = await bgSpawner.spawn({
 					id,
@@ -60,24 +103,59 @@ function createAgentTool(
 					model: role,
 				})
 
-				return `Spawned agent_${role} in background (task ${task.id}, status: ${task.status}). Use bg_status or bg_wait to track.`
+				return (
+					`Spawned agent_${role} in background.\n\n` +
+					`**task_id**: ${task.id}\n` +
+					`**session_id**: ${task.sessionId ?? '(pending)'}\n` +
+					`**status**: ${task.status}\n\n` +
+					'Use `bg_status` to check progress, `bg_wait` to wait, ' +
+					'or call this tool again with session_id to continue the conversation.'
+				)
 			}
 
-			// Sync delegation — create a session, prompt, and collect result
+			// ── Sync delegation ────────────────────────────────────────
 			try {
-				const createResult = await v2.session.create({
-					title: `agent_${role}: ${args.prompt.slice(0, 60)}`,
-					directory,
-				})
+				let sessionId: string
 
-				if (createResult.error || !createResult.data) {
-					return `Failed to create session for agent_${role}: ${JSON.stringify(createResult.error)}`
+				if (args.session_id) {
+					// ── Continuation: reuse existing session ──
+					sessionId = args.session_id
+
+					// Verify session still exists
+					const sessResult = await v2.session.get({ sessionID: sessionId })
+					if (sessResult.error || !sessResult.data) {
+						return `Session ${sessionId} not found or expired. Start a new conversation by omitting session_id.`
+					}
+
+					logger.log(`[agent-as-tool] continuing session=${sessionId} agent=${role}`)
+				} else {
+					// ── New child session ──
+					// Use parentID to create a proper child session per OpenCode docs
+					// @see https://opencode.ai/docs/agents — "When subagents create child sessions"
+					const createResult = await v2.session.create({
+						parentID: parentSessionID,
+						title: `agent_${role}: ${args.prompt.slice(0, 60)}`,
+						directory,
+					})
+
+					if (createResult.error || !createResult.data) {
+						return `Failed to create session for agent_${role}: ${JSON.stringify(createResult.error)}`
+					}
+
+					sessionId = createResult.data.id
+					logger.log(
+						`[agent-as-tool] new child session=${sessionId} parent=${parentSessionID} agent=${role}`,
+					)
 				}
 
-				const sessionId = createResult.data.id
-				const fullPrompt = args.context ? `${args.context}\n\n---\n\n${args.prompt}` : args.prompt
+				// Build the prompt — context only on first message
+				const fullPrompt =
+					!args.session_id && args.context ? `${args.context}\n\n---\n\n${args.prompt}` : args.prompt
 
-				const promptResult = await v2.session.promptAsync({
+				// Use sync session.prompt() — waits for full response
+				// Returns { info: AssistantMessage, parts: Part[] }
+				// @see https://opencode.ai/docs/sdk — session.prompt()
+				const promptResult = await v2.session.prompt({
 					sessionID: sessionId,
 					directory,
 					agent: role,
@@ -88,33 +166,63 @@ function createAgentTool(
 					return `agent_${role} prompt failed: ${JSON.stringify(promptResult.error)}`
 				}
 
-				// Poll for result (up to 120s)
-				const deadline = Date.now() + 120_000
-				while (Date.now() < deadline) {
-					await new Promise(r => setTimeout(r, 2000))
-					const sessResult = await v2.session.get({ sessionID: sessionId })
-					if (sessResult.error || !sessResult.data) continue
-
-					// Cast through unknown — the runtime shape may include messages
-					const session = sessResult.data as Record<string, unknown>
-					const messages = session.messages as Array<{ role: string; content: unknown }> | undefined
-					if (!messages || messages.length < 2) continue
-
-					const lastMsg = messages[messages.length - 1]
-					const content =
-						typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content)
-
-					// Simple heuristic: if the last message is from assistant, the agent is done
-					if (lastMsg.role === 'assistant') {
-						return content.slice(0, 4000)
-					}
+				// Extract text from the response parts
+				const data = promptResult.data as { info: Record<string, unknown>; parts: Array<{ type: string; text?: string }> } | null
+				if (!data) {
+					return (
+						`agent_${role} returned no response.\n\n` +
+						`**session_id**: ${sessionId}\n` +
+						'Call this tool again with session_id to send a follow-up.'
+					)
 				}
 
-				return `agent_${role} timed out after 120s. Check session ${sessionId} manually.`
+				const responseText = extractPartsText(data.parts)
+				const output = responseText.slice(0, MAX_OUTPUT_CHARS)
+				const truncated = responseText.length > MAX_OUTPUT_CHARS ? '\n\n[output truncated]' : ''
+
+				return (
+					`${output}${truncated}\n\n---\n` +
+					`**session_id**: ${sessionId}\n` +
+					'To continue this conversation, call this tool again with the session_id above.'
+				)
 			} catch (err) {
 				logger.log(`[agent-as-tool] agent_${role} error: ${err instanceof Error ? err.message : err}`)
 				return `agent_${role} error: ${err instanceof Error ? err.message : String(err)}`
 			}
 		},
 	})
+}
+
+/**
+ * Continue a background session by sending a new prompt to an existing session.
+ * Uses promptAsync since background tasks are fire-and-forget.
+ */
+async function continueBackgroundSession(
+	v2: ToolContext['v2'],
+	directory: string,
+	role: string,
+	args: { prompt: string; session_id?: string },
+): Promise<string> {
+	const sessionId = args.session_id!
+
+	try {
+		const promptResult = await v2.session.promptAsync({
+			sessionID: sessionId,
+			directory,
+			agent: role,
+			parts: [{ type: 'text' as const, text: args.prompt }],
+		})
+
+		if (promptResult.error) {
+			return `Failed to continue background session: ${JSON.stringify(promptResult.error)}`
+		}
+
+		return (
+			`Sent follow-up to agent_${role} in session ${sessionId}.\n\n` +
+			'The agent continues with full previous context preserved.\n' +
+			'Use `bg_status` to check progress or call this tool again with session_id to continue.'
+		)
+	} catch (err) {
+		return `Failed to continue session: ${err instanceof Error ? err.message : String(err)}`
+	}
 }

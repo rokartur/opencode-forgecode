@@ -1,5 +1,8 @@
 /**
- * Background task tools — spawn, monitor, wait, and cancel background agent tasks.
+ * Background task tools — spawn, monitor, wait, continue, and cancel background agent tasks.
+ *
+ * Supports multi-turn conversations with background agents via bg_continue:
+ * send follow-up prompts to running/completed sessions, preserving full context.
  */
 
 import { tool } from '@opencode-ai/plugin'
@@ -19,9 +22,11 @@ function formatTask(t: {
 	summary: string
 	createdAt: number
 	error?: string
+	sessionId?: string | null
 }): string {
 	const age = Math.round((Date.now() - t.createdAt) / 1000)
 	let line = `**${t.id}** [${t.status}] agent=${t.targetAgent} model=${t.model} (${age}s ago)`
+	if (t.sessionId) line += `\n  session_id: ${t.sessionId}`
 	if (t.summary) line += `\n  Last output: ${t.summary.slice(0, 200)}`
 	if (t.error) line += `\n  Error: ${t.error.slice(0, 200)}`
 	return line
@@ -61,6 +66,14 @@ export function createBackgroundTools(
 				args: { id: z.string().describe('Task ID') },
 				execute: async () => DISABLED_MSG,
 			}),
+			bg_continue: tool({
+				description: 'Continue a conversation with a background agent.',
+				args: {
+					id: z.string().describe('Task ID'),
+					prompt: z.string().describe('Follow-up prompt'),
+				},
+				execute: async () => DISABLED_MSG,
+			}),
 			bg_cancel: tool({
 				description: 'Cancel a background task.',
 				args: { id: z.string().describe('Task ID') },
@@ -72,7 +85,8 @@ export function createBackgroundTools(
 	return {
 		bg_spawn: tool({
 			description:
-				'Spawn a background agent task. The agent runs in a separate session and can be monitored or cancelled.',
+				'Spawn a background agent task. The agent runs in a separate session and can be monitored, continued, or cancelled.\n\n' +
+				'Returns a task_id and session_id. Use session_id with bg_continue to send follow-up messages.',
 			args: {
 				agent: z
 					.string()
@@ -83,18 +97,22 @@ export function createBackgroundTools(
 			},
 			execute: async args => {
 				const id = `bg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-				const model = args.model ?? args.agent // Use agent name as model key if no model specified
+				const model = args.model ?? args.agent
 
 				const task = await bgSpawner.spawn({
 					id,
-					parentAgent: 'forge', // TODO: get from session context
+					parentAgent: 'forge',
 					targetAgent: args.agent,
 					prompt: args.prompt,
 					context: args.context,
 					model,
 				})
 
-				return `Background task spawned:\n${formatTask(task)}\n\nUse \`bg_status\` to check progress or \`bg_wait\` to wait for completion.`
+				return (
+					`Background task spawned:\n${formatTask(task)}\n\n` +
+					'Use `bg_status` to check progress, `bg_wait` to wait, ' +
+					'or `bg_continue` with the task ID to send follow-up messages.'
+				)
 			},
 		}),
 
@@ -146,6 +164,51 @@ export function createBackgroundTools(
 				const task = bgManager.getById(args.id)
 				if (!task) return `Task ${args.id} not found.`
 				return `Wait timed out. Current status:\n${formatTask(task)}`
+			},
+		}),
+
+		bg_continue: tool({
+			description:
+				'Continue a conversation with a background agent by sending a follow-up prompt.\n\n' +
+				'The agent receives the new prompt with full previous context preserved. ' +
+				'Works on running or completed tasks. The task is re-marked as running.',
+			args: {
+				id: z.string().describe('Task ID to continue'),
+				prompt: z.string().describe('Follow-up prompt / instruction for the agent'),
+			},
+			execute: async args => {
+				const task = bgManager.getById(args.id)
+				if (!task) return `Task ${args.id} not found.`
+				if (!task.sessionId) {
+					return `Task ${args.id} has no session yet (status: ${task.status}). Wait for it to start first.`
+				}
+
+				try {
+					// Send follow-up prompt to the existing session
+					const promptResult = await ctx.v2.session.promptAsync({
+						sessionID: task.sessionId,
+						directory: ctx.directory,
+						agent: task.targetAgent,
+						parts: [{ type: 'text' as const, text: args.prompt }],
+					})
+
+					if (promptResult.error) {
+						return `Failed to continue task ${args.id}: ${JSON.stringify(promptResult.error)}`
+					}
+
+					// Re-mark as running if it was completed
+					if (task.status === 'completed' || task.status === 'error') {
+						bgManager.markRunning(task.id, task.sessionId)
+					}
+
+					return (
+						`Sent follow-up to task ${args.id} (agent=${task.targetAgent}, session=${task.sessionId}).\n\n` +
+						'Agent continues with full previous context preserved.\n' +
+						'Use `bg_status` to monitor or `bg_wait` to wait for completion.'
+					)
+				} catch (err) {
+					return `Failed to continue task: ${err instanceof Error ? err.message : String(err)}`
+				}
 			},
 		}),
 

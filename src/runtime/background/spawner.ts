@@ -179,47 +179,104 @@ export class BackgroundSpawner {
 				await this.startTask(taskId)
 			}
 
-			// 2. Check running tasks for idle detection
+			// 2. Check running tasks for idle detection using session.status()
+			// and session.messages() per the official OpenCode SDK API.
+			// @see https://opencode.ai/docs/sdk — session.status(), session.messages()
 			const running = this.bgManager.getByStatus('running')
 			const now = Date.now()
+
+			// Batch-fetch session statuses: { [sessionID]: SessionStatus }
+			let sessionStatuses: Record<string, { type: string }> = {}
+			try {
+				const statusResult = await this.v2.session.status()
+				if (!statusResult.error && statusResult.data) {
+					sessionStatuses = statusResult.data as Record<string, { type: string }>
+				}
+			} catch {
+				// Status fetch failure is non-fatal; fall back to message-based detection
+			}
 
 			for (const task of running) {
 				if (!task.sessionId) continue
 
 				try {
-					// Fetch latest output
-					const sessResult = await this.v2.session.get({ sessionID: task.sessionId })
-					if (sessResult.error || !sessResult.data) continue
+					// Check session status first (most efficient)
+					const status = sessionStatuses[task.sessionId]
+					const isIdle = status?.type === 'idle'
 
-					// Cast through unknown — runtime shape may include messages
-					const session = sessResult.data as Record<string, unknown>
-					const messages = (session.messages ?? []) as Array<{ role: string; content: unknown }>
+					if (isIdle) {
+						// Session is idle — fetch messages to get final output
+						const msgsResult = await this.v2.session.messages({
+							sessionID: task.sessionId,
+							directory: this.directory,
+							limit: 5,
+						})
+
+						const messages = (msgsResult.data ?? []) as Array<{
+							info: { role: string }
+							parts: Array<{ type: string; text?: string }>
+						}>
+
+						const lastAssistant = messages
+							.filter(m => m.info.role === 'assistant')
+							.pop()
+
+						const summary = lastAssistant
+							? lastAssistant.parts
+									.filter(p => p.type === 'text' && p.text)
+									.map(p => p.text!)
+									.join('\n')
+									.slice(0, 500)
+							: '(no output)'
+
+						this.bgManager.markCompleted(task.id, summary)
+						this.lastOutputHash.delete(task.id)
+						this.logger.log(`[bg-spawner] idle-completed task=${task.id}`)
+						this.emitEvent('completed', task.id)
+						continue
+					}
+
+					// Session is still busy — use messages endpoint for output tracking
+					const msgsResult = await this.v2.session.messages({
+						sessionID: task.sessionId,
+						directory: this.directory,
+						limit: 3,
+					})
+
+					const messages = (msgsResult.data ?? []) as Array<{
+						info: { role: string }
+						parts: Array<{ type: string; text?: string }>
+					}>
+
 					const lastMsg = messages[messages.length - 1]
-					const outputHash = lastMsg ? `${messages.length}:${JSON.stringify(lastMsg).length}` : ''
+					const outputHash = lastMsg
+						? `${messages.length}:${JSON.stringify(lastMsg.parts).length}`
+						: ''
 
 					const prev = this.lastOutputHash.get(task.id)
 					if (prev && prev.hash === outputHash) {
-						// Same output — check idle timeout
+						// Same output — check idle timeout as fallback
 						if (now - prev.since >= this.idleTimeoutMs) {
-							// Idle detected → mark completed
 							const summary = lastMsg
-								? (typeof lastMsg.content === 'string'
-										? lastMsg.content
-										: JSON.stringify(lastMsg.content)
-									).slice(0, 500)
+								? lastMsg.parts
+										.filter(p => p.type === 'text' && p.text)
+										.map(p => p.text!)
+										.join('\n')
+										.slice(0, 500)
 								: '(no output)'
 							this.bgManager.markCompleted(task.id, summary)
 							this.lastOutputHash.delete(task.id)
-							this.logger.log(`[bg-spawner] idle-completed task=${task.id}`)
+							this.logger.log(`[bg-spawner] idle-timeout-completed task=${task.id}`)
 							this.emitEvent('completed', task.id)
 						}
 					} else {
-						// Output changed — reset idle timer
+						// Output changed — reset idle timer and update summary
 						const summary = lastMsg
-							? (typeof lastMsg.content === 'string'
-									? lastMsg.content
-									: JSON.stringify(lastMsg.content)
-								).slice(0, 500)
+							? lastMsg.parts
+									.filter(p => p.type === 'text' && p.text)
+									.map(p => p.text!)
+									.join('\n')
+									.slice(0, 500)
 							: ''
 						this.bgManager.updateSummary(task.id, summary)
 						this.lastOutputHash.set(task.id, { hash: outputHash, since: now })

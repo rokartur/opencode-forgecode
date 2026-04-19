@@ -70,13 +70,21 @@ describe('BackgroundManager', () => {
 		expect(task.sessionId).toBe('session-abc')
 	})
 
-	test('markRunning ignores non-pending tasks', () => {
+	test('markRunning re-activates completed/error tasks for continuation', () => {
 		mgr.enqueue(makeTask({ id: 'r-2' }))
 		mgr.markRunning('r-2', 'sess-1')
 		mgr.markCompleted('r-2', 'done')
-		// attempt to re-mark as running
+		// re-mark as running for continuation (per bg_continue support)
 		mgr.markRunning('r-2', 'sess-2')
-		expect(mgr.getById('r-2')!.status).toBe('completed')
+		expect(mgr.getById('r-2')!.status).toBe('running')
+		expect(mgr.getById('r-2')!.sessionId).toBe('sess-2')
+	})
+
+	test('markRunning ignores cancelled tasks', () => {
+		mgr.enqueue(makeTask({ id: 'r-3' }))
+		mgr.cancel('r-3')
+		mgr.markRunning('r-3', 'sess-3')
+		expect(mgr.getById('r-3')!.status).toBe('cancelled')
 	})
 
 	test('markCompleted transitions running → completed', () => {

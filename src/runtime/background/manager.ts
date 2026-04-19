@@ -153,10 +153,12 @@ export class BackgroundManager {
 		return this.getById(params.id)!
 	}
 
-	/** Transition a task to running with a session ID. */
+	/** Transition a task to running with a session ID.
+	 * Works from pending (initial start) and from completed/error (continuation). */
 	markRunning(id: string, sessionId: string): void {
 		const task = this.getById(id)
-		if (!task || task.status !== 'pending') return
+		if (!task) return
+		if (task.status !== 'pending' && task.status !== 'completed' && task.status !== 'error') return
 		this.stmts.update.run(sessionId, 'running', task.summary, Date.now(), null, id)
 	}
 

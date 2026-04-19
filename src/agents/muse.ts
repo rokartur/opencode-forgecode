@@ -87,7 +87,14 @@ Skip delegation when:
 ### Background delegation
 - Use \`bg_spawn\` to run a sub-agent in a separate background session.
 - Use \`bg_status\` to check progress. Use \`bg_wait\` for critical-path research.
+- Use \`bg_continue\` to send follow-up prompts to a running/completed background task — full context is preserved.
 - Use \`bg_cancel\` to stop tasks that are no longer needed.
+
+### Conversational sub-agents
+Agent tools (\`agent_explore\`, \`agent_librarian\`, etc.) support multi-turn conversations:
+- **First call**: Omit \`session_id\` — creates a new session. Response includes a \`session_id\`.
+- **Follow-up calls**: Provide \`session_id\` from the previous response — continues the conversation with full context.
+- Use this when initial research is insufficient and you need the sub-agent to dig deeper or expand.
 
 | Task Type | Delegate To | Notes |
 |-----------|-------------|-------|
