@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { existsSync } from 'fs'
 import { join } from 'path'
@@ -93,7 +93,7 @@ describe('CLI Status - list-worktrees', () => {
 	})
 
 	test('skips expired entries', async () => {
-		const db = createTestKvDb(tempDir)
+		const _db = createTestKvDb(tempDir)
 		const db2 = new Database(join(tempDir, 'memory.db'))
 		const now = Date.now()
 		const expiredAt = now - 86400000

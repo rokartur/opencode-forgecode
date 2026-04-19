@@ -5,8 +5,8 @@
     "": {
       "name": "opencode-forgecode",
       "dependencies": {
-        "@opencode-ai/plugin": "^1.4.10",
-        "@opencode-ai/sdk": "^1.4.10",
+        "@opencode-ai/plugin": "^1.14.17",
+        "@opencode-ai/sdk": "^1.14.17",
         "@types/better-sqlite3": "^7.6.13",
         "better-sqlite3": "^12.9.0",
         "tree-sitter-wasms": "0.1.13",
@@ -168,9 +168,9 @@
 
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.3", "", { "os": "win32", "cpu": "x64" }, "sha512-x0fWaQtYp4E6sktbsdAqnehxDgEc/VwM7uLsRCYWaiGu0ykYdZPiS8zCWdnjHwyiumousxfBm4SO31eXqwEZhQ=="],
 
-    "@opencode-ai/plugin": ["@opencode-ai/plugin@1.4.10", "", { "dependencies": { "@opencode-ai/sdk": "1.4.10", "effect": "4.0.0-beta.48", "zod": "4.1.8" }, "peerDependencies": { "@opentui/core": ">=0.1.100", "@opentui/solid": ">=0.1.100" }, "optionalPeers": ["@opentui/core", "@opentui/solid"] }, "sha512-35Za2LT2oNWnBoonmPjN1Z9PB4+ir2a6GbZ3nIZQQL/96mqzTRkT1FqUkQc3bdMmfT1R1rqOd5aMzkIXMqC7dA=="],
+    "@opencode-ai/plugin": ["@opencode-ai/plugin@1.14.17", "", { "dependencies": { "@opencode-ai/sdk": "1.14.17", "effect": "4.0.0-beta.48", "zod": "4.1.8" }, "peerDependencies": { "@opentui/core": ">=0.1.100", "@opentui/solid": ">=0.1.100" }, "optionalPeers": ["@opentui/core", "@opentui/solid"] }, "sha512-duZbNClMsIR1rmYGsrkA92BuGKkH2TsXk1TpPNBASVukVXSSz2jLdhe1UkSeNVXiDg/aGT52yVgitga3rV8qWw=="],
 
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.4.10", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-Yaddcs/COp0hwiCxgobSZyDUN0nHgkEFL4bG0BQxwd52SGAysOr6A6L0ihfkuhVx0kbi9eXWgZk4ydNOrnur5w=="],
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.14.17", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-Q42C4VsczrPc+8hB76OO18KZ3A3l4cRHy31Vn8if7W/02qHAA1JoQXbbZD9/9fBqHHyYXC6h9dd4H4TaBi53Zw=="],
 
     "@opentui/core": ["@opentui/core@0.1.100", "", { "dependencies": { "bun-ffi-structs": "0.1.2", "diff": "8.0.2", "jimp": "1.6.0", "marked": "17.0.1", "yoga-layout": "3.2.1" }, "optionalDependencies": { "@dimforge/rapier2d-simd-compat": "^0.17.3", "@opentui/core-darwin-arm64": "0.1.100", "@opentui/core-darwin-x64": "0.1.100", "@opentui/core-linux-arm64": "0.1.100", "@opentui/core-linux-x64": "0.1.100", "@opentui/core-win32-arm64": "0.1.100", "@opentui/core-win32-x64": "0.1.100", "bun-webgpu": "0.1.5", "planck": "^1.4.2", "three": "0.177.0" }, "peerDependencies": { "web-tree-sitter": "0.25.10" } }, "sha512-g6Ft3CcOVpytMzq2AZrnHHeMrmvYeLVCsy/8LqZ30VnPv0zfJ+f1TVi/EFrcl4m0GRPdy6yBOVOMcIAWHSZvtg=="],
 

@@ -68,8 +68,8 @@
 		"prepack": "bun run check && bun run build"
 	},
 	"dependencies": {
-		"@opencode-ai/plugin": "^1.4.10",
-		"@opencode-ai/sdk": "^1.4.10",
+		"@opencode-ai/plugin": "^1.14.17",
+		"@opencode-ai/sdk": "^1.14.17",
 		"@types/better-sqlite3": "^7.6.13",
 		"better-sqlite3": "^12.9.0",
 		"tree-sitter-wasms": "0.1.13",

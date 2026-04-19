@@ -1,30 +1,58 @@
-# opencode-forgecode
+<div align="center">
 
-Forge (loops, plans, sandbox, graph) + the ForgeCode harness (summary-frame compaction, doom-loop, pending-todos, truncation, undo snapshots) for [OpenCode](https://opencode.ai).
+# ⚒️ opencode-forgecode
 
-`opencode-forgecode` is a single plugin that combines two toolchains:
+**The all-in-one OpenCode plugin for autonomous development workflows.**
 
-- **opencode-forge** — iterative development loops, session-scoped plan storage, review-finding persistence, code-structure graph indexing, Docker sandbox, and a TUI sidebar.
-- **ForgeCode harness** — a port of [forgecode](https://forgecode.dev)'s runtime: summary-frame compaction, output truncation (shell / search / fetch), doom-loop detection, pending-todo reminders, undo snapshots on mutating tools, and the unified `forge` / `muse` / `sage` agent trinity.
+Iterative loops · Multi-agent orchestration · Code graph · Sandboxed execution · Smart harness
 
-Both sides are wired through the same plugin entrypoint, so you do not need to stack two plugins that would fight over `experimental.session.compacting`, `tool.execute.*`, or `event`.
+[![npm](https://img.shields.io/npm/v/opencode-forgecode)](https://www.npmjs.com/package/opencode-forgecode) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Tests](https://img.shields.io/badge/tests-756%20passing-brightgreen)]()
+
+</div>
+
+---
+
+## What is this?
+
+`opencode-forgecode` is a single plugin for [OpenCode](https://opencode.ai) that gives your AI agents the ability to plan, execute, review, and iterate — autonomously. It combines two systems into one cohesive runtime:
+
+|  |  |
+| --- | --- |
+| **Forge** | Iterative development loops with git worktree isolation, session-scoped plans, code-graph indexing, Docker/Firejail/Bubblewrap sandboxing, background tasks, and a TUI sidebar |
+| **Harness** | Summary-frame compaction, output truncation, doom-loop detection, pending-todo reminders, undo snapshots, and the multi-agent system (9 specialized agents) |
+
+Both systems share the same plugin entrypoint — no conflicts over hooks, no duplicate compaction, no fighting for `tool.execute.*`.
+
+---
 
 ## Quick Start
+
+### 1. Install
 
 ```bash
 npm add opencode-forgecode
 ```
 
-Add to your `opencode.json`:
+### 2. Configure OpenCode
+
+**`opencode.json`:**
 
 ```json
 {
 	"$schema": "https://opencode.ai/config.json",
-	"plugin": ["opencode-forgecode@latest"]
+	"plugin": ["opencode-forgecode@latest"],
+	"compaction": { "auto": true, "prune": true },
+	"agent": {
+		"forge": { "model": "anthropic/claude-opus-4.7" },
+		"muse": { "model": "openai/gpt-5.4" },
+		"sage": { "model": "openai/gpt-5.4-mini" }
+	}
 }
 ```
 
-Add to your `~/.config/opencode/tui.json` to enable the sidebar:
+### 3. Enable TUI sidebar (optional)
+
+**`~/.config/opencode/tui.json`:**
 
 ```json
 {
@@ -33,421 +61,520 @@ Add to your `~/.config/opencode/tui.json` to enable the sidebar:
 }
 ```
 
-On first run the plugin auto-creates `~/.config/opencode/forge-config.jsonc` from the bundled template.
+### 4. Done
 
-Runtime notes:
+On first run the plugin auto-creates `~/.config/opencode/forge-config.jsonc` with sensible defaults. Run `oc-forgecode doctor` to verify everything is wired correctly.
 
-- **Server/backend plugin** — packaged `dist/index.js` is built for Node-compatible loading.
-- **TUI plugin** — still depends on the OpenTUI/Bun runtime stack (`@opentui/core` / `bun:ffi`), so treat the sidebar as Bun/OpenTUI-bound for now.
-- If the backend still fails before the host can reach its local plugin URL, enable logging in `~/.config/opencode/forge-config.jsonc`:
-
-```jsonc
-{
-	"logging": {
-		"enabled": true,
-		"debug": true,
-	},
-}
-```
-
-## Features
-
-### Forge
-
-- **Iterative Development Loops** — Autonomous coding/auditing loop with optional worktree isolation, session rotation, stall detection, and review-finding persistence.
-- **Session Plan Storage** — Session-scoped plan storage with 7-day TTL; plans viewable and editable from the TUI sidebar.
-- **Review Finding Persistence** — Store and retrieve audit findings across session rotations.
-- **Graph Indexing** — Code-structure graph with file watching, auto-scanning, and symbol tracking.
-- **Docker Sandbox** — Run loops inside isolated Docker containers with a bind-mounted project directory.
-- **Bundled TS agent trinity** — `forge`, `muse`, `sage` preconfigured for graph-aware workflows (TypeScript `src/agents/*.ts`). Registered automatically when the plugin loads — no separate install step.
-- **CLI** — `oc-forgecode loop …`, `oc-forgecode graph …`, `oc-forgecode upgrade`.
-
-### Harness
-
-- **Summary-frame compaction** — Overrides `experimental.session.compacting` with the ported `forge-partial-summary-frame.md`. Falls back to forge's custom compaction prompt when no cached messages are available.
-- **Output truncation** — `tool.execute.after` trims `bash`/`shell` output (head+tail with long-line clipping), caps lines for `grep`/`glob`/search tools, and caps characters for `webfetch`.
-- **Doom-loop detection** — Per-session tool-signature tracker. On threshold-length repeating patterns (identical or cyclic, defaults to 3), appends a reminder via `tui.appendPrompt` asking the agent to change strategy.
-- **Pending-todos reminder** — Tracks `todo.updated` events. When a session goes idle with `pending` or `in_progress` todos, appends a reminder with the outstanding items.
-- **Undo snapshots** — Before every `write` / `edit` / `multi_patch` call, the prior file contents are snapshotted under `<dataDir>/snapshots/<session>/<ts>-<tag>.bak`. Restore with the bundled `fs_undo` tool.
+---
 
 ## Agents
 
-The plugin ships a unified TS-backed agent trinity. All three are registered automatically when the plugin loads — no `setup` step required, no markdown agents installed into `~/.config/opencode/agents/`.
+The plugin ships **9 specialized agents**, all registered automatically on load:
 
-| Agent | Mode | Description |
-| --- | --- | --- |
-| **forge** | primary | Primary coding agent with graph-first code discovery and harness tone. Read/edit/bash access. `review-delete`, `plan-execute`, `plan-write`, `plan-edit`, and `loop` are excluded. |
-| **muse** | primary | Strategic planning agent. Builds plans incrementally in the KV store, caches them for user approval, and dispatches execution programmatically. All edits denied. Enforces two-step approval (pre-plan checkpoint + execution checkpoint with four canonical options). |
-| **sage** | subagent | Dual-mode research + code review agent. Mode is selected from the request: review mode on diffs/commits/PRs/loop iterations, research mode on architectural or cross-file investigation. Read-only. Temperature 0.0. `plan-execute`, `plan-write`, `plan-edit`, and `loop` are excluded. |
+### Core Trinity
 
-The muse agent runs with all edits denied via message-level enforcement in the `experimental.chat.messages.transform` hook.
+| Agent | Role | Mode | Description |
+| --- | --- | --- | --- |
+| **forge** | Coder | primary | Graph-first code discovery, read/write/bash access, harness-aware. The workhorse. |
+| **muse** | Planner | primary | Strategic planning with KV-backed plan store. All file edits denied. Two-step approval flow before any execution. |
+| **sage** | Reviewer | subagent | Dual-mode: code review on diffs/PRs or deep research on architecture. Read-only, temp 0.0. |
 
-Example agent model overrides in `opencode.json`:
+### Extended Agents
 
-```json
-{
-	"$schema": "https://opencode.ai/config.json",
-	"plugin": ["opencode-forgecode@latest"],
-	"compaction": {
-		"auto": true,
-		"prune": true
-	},
-	"agent": {
-		"forge": { "model": "anthropic/claude-opus-4.7" },
-		"muse": {
-			"model": "openai/gpt-5.4",
-			"reasoningEffort": "high",
-			"textVerbosity": "medium",
-			"reasoningSummary": "auto"
-		},
-		"sage": {
-			"model": "openai/gpt-5.4-mini",
-			"reasoningEffort": "high",
-			"textVerbosity": "low",
-			"reasoningSummary": "auto"
-		}
-	}
-}
-```
+| Agent          | Role            | Description                                                             |
+| -------------- | --------------- | ----------------------------------------------------------------------- |
+| **explore**    | Explorer        | Parallel codebase discovery — optimized for broad, open-ended questions |
+| **oracle**     | Q&A             | Short, precise answers to specific codebase questions                   |
+| **librarian**  | Researcher      | Information retrieval using read-only tools                             |
+| **prometheus** | Generator       | Scaffolding, boilerplate, migrations, templates                         |
+| **metis**      | Meta-agent      | Analyzes context and recommends which agent to use next                 |
+| **caveman**    | Efficiency mode | Cuts ~75% output tokens while keeping technical substance               |
 
-Suggested model split:
+Agents can call each other via `bg_spawn` (Sisyphus-style delegation) or the `tool_supported` agent-as-tool pattern.
 
-- Strong model for `forge` / `muse`.
-- Cheaper / faster model for `sage`.
-- Keep OpenCode `compaction.auto=true` and `compaction.prune=true`; forgecode's summary-frame compaction builds on top of the native safety net rather than replacing it.
-
-### Recommended OpenCode + DCP setup
-
-For long tool-heavy sessions, `@tarquinen/opencode-dcp` can complement forgecode well **if** forgecode remains the owner of final session compaction and DCP is used only for proactive pruning/compression.
-
-Recommended `opencode.json`:
-
-```json
-{
-	"$schema": "https://opencode.ai/config.json",
-	"plugin": ["opencode-forgecode@latest", "@tarquinen/opencode-dcp@latest"],
-	"compaction": {
-		"auto": true,
-		"prune": true
-	},
-	"agent": {
-		"forge": { "model": "anthropic/claude-opus-4.7" },
-		"muse": {
-			"model": "openai/gpt-5.4",
-			"reasoningEffort": "high",
-			"textVerbosity": "medium",
-			"reasoningSummary": "auto"
-		},
-		"sage": {
-			"model": "openai/gpt-5.4-mini",
-			"reasoningEffort": "high",
-			"textVerbosity": "low",
-			"reasoningSummary": "auto"
-		}
-	}
-}
-```
-
-Recommended `~/.config/opencode/dcp.jsonc`:
-
-```jsonc
-{
-	"$schema": "https://raw.githubusercontent.com/Opencode-DCP/opencode-dynamic-context-pruning/master/dcp.schema.json",
-	"enabled": true,
-	"experimental": {
-		"allowSubAgents": false,
-	},
-	"compress": {
-		"permission": "allow",
-		"protectedTools": [
-			"graph-query",
-			"graph-symbols",
-			"graph-analyze",
-			"plan-write",
-			"plan-read",
-			"plan-edit",
-			"review-write",
-			"review-read",
-			"review-delete",
-			"apply_patch",
-			"multi_patch",
-			"sem_search",
-		],
-	},
-	"strategies": {
-		"deduplication": {
-			"enabled": true,
-			"protectedTools": [
-				"graph-query",
-				"graph-symbols",
-				"graph-analyze",
-				"plan-write",
-				"plan-read",
-				"plan-edit",
-				"review-write",
-				"review-read",
-				"review-delete",
-				"apply_patch",
-				"multi_patch",
-				"sem_search",
-			],
-		},
-		"purgeErrors": {
-			"enabled": true,
-			"protectedTools": [
-				"graph-query",
-				"graph-symbols",
-				"graph-analyze",
-				"plan-write",
-				"plan-read",
-				"plan-edit",
-				"review-write",
-				"review-read",
-				"review-delete",
-				"apply_patch",
-				"multi_patch",
-				"sem_search",
-			],
-		},
-	},
-}
-```
-
-Use DCP when:
-
-- you keep long-lived sessions open,
-- graph/search/bash outputs accumulate heavily,
-- you want proactive cleanup before OpenCode hits hard compaction.
-
-Skip DCP when:
-
-- you usually start fresh sessions,
-- your model has a very large context window and token cost is not a concern,
-- you want the simplest possible setup.
+---
 
 ## Tools
 
-### Plan Tools
+### 📝 Plan & Review
 
-| Tool           | Description                                                                  |
-| -------------- | ---------------------------------------------------------------------------- |
-| `plan-write`   | Store the entire plan content. Auto-resolves key to `plan:{sessionID}`.      |
-| `plan-edit`    | Edit the plan by finding `old_string` and replacing with `new_string`.       |
-| `plan-read`    | Retrieve the plan. Supports pagination with offset/limit and pattern search. |
-| `plan-execute` | Create a new forge session and send an approved plan as the first prompt.    |
+| Tool            | Description                                                |
+| --------------- | ---------------------------------------------------------- |
+| `plan-write`    | Store a plan (auto-keyed to `plan:{sessionID}`, 7-day TTL) |
+| `plan-edit`     | Find-and-replace within the stored plan                    |
+| `plan-read`     | Retrieve plan with pagination and pattern search           |
+| `plan-execute`  | Launch plan execution as a new forge session               |
+| `review-write`  | Store review findings (file, line, severity, description)  |
+| `review-read`   | Query findings by file path or regex                       |
+| `review-delete` | Remove a finding by file and line                          |
 
-### Review Tools
+### 🔁 Loops
 
-| Tool            | Description                                                                                   |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| `review-write`  | Store a review finding with file, line, severity, and description. Auto-injects branch field. |
-| `review-read`   | Retrieve review findings. Filter by file path or search by regex pattern.                     |
-| `review-delete` | Delete a review finding by file and line.                                                     |
+| Tool          | Description                                                            |
+| ------------- | ---------------------------------------------------------------------- |
+| `loop`        | Run an iterative dev loop. `worktree: true` for git worktree isolation |
+| `loop-status` | List active loops or get details by name. `restart` to resume          |
+| `loop-cancel` | Cancel a running loop                                                  |
 
-### Loop Tools
-
-| Tool | Description |
-| --- | --- |
-| `loop` | Execute a plan using an iterative development loop. Default runs in current directory. Set `worktree: true` for isolated git worktree. |
-| `loop-cancel` | Cancel an active loop by worktree name. |
-| `loop-status` | List all active loops or get detailed status by worktree name. Supports `restart` to resume inactive loops. |
-
-### Graph Tools
+### 🕸️ Code Graph
 
 | Tool | Description |
 | --- | --- |
-| `graph-status` | Check graph indexing status or trigger re-scan. Actions: `status`, `scan`. |
-| `graph-query` | File-level queries: `top_files`, `file_deps`, `file_dependents`, `cochanges`, `blast_radius`, `packages`, `file_symbols`. |
-| `graph-symbols` | Symbol-level queries: `find`, `search`, `signature`, `callers`, `callees`. |
-| `graph-analyze` | Code-quality analysis: `unused_exports`, `duplication`, `near_duplicates`. |
+| `graph-status` | Check indexing status or trigger a re-scan |
+| `graph-query` | File-level: `top_files`, `file_deps`, `file_dependents`, `cochanges`, `blast_radius`, `packages`, `file_symbols` |
+| `graph-symbols` | Symbol-level: `find`, `search`, `signature`, `callers`, `callees`, `blast_radius`, `call_cycles` |
+| `graph-analyze` | Quality: `unused_exports`, `duplication`, `near_duplicates` |
 
-### Harness Tools
+### 🔧 Editing & Undo
 
-| Tool          | Description                                                                             |
-| ------------- | --------------------------------------------------------------------------------------- |
-| `multi_patch` | Apply multiple text replacements to a single file atomically (tempfile + rename).       |
-| `fs_undo`     | Restore a file from the snapshot history written by the harness on mutating tool calls. |
+| Tool          | Description                                                            |
+| ------------- | ---------------------------------------------------------------------- |
+| `patch`       | Hash-anchored `LINE#HASH` replacements — resilient to concurrent edits |
+| `multi_patch` | Atomic multi-replacement on a single file (tempfile + rename)          |
+| `fs_undo`     | Restore from automatic pre-edit snapshots                              |
+
+### 🧠 Code Intelligence
+
+| Tool               | Description                                                   |
+| ------------------ | ------------------------------------------------------------- |
+| `lsp_diagnostics`  | Fetch diagnostics from language servers                       |
+| `lsp_hover`        | Get type info and docs for a symbol                           |
+| `lsp_references`   | Find all references to a symbol                               |
+| `lsp_definition`   | Jump to definition                                            |
+| `lsp_code_actions` | Get available code actions                                    |
+| `lsp_rename`       | Rename a symbol across the project                            |
+| `ast_search`       | Structural code search via `ast-grep` patterns                |
+| `ast_rewrite`      | Structural code rewrites via `ast-grep`                       |
+| `sem_search`       | Semantic search with embeddings (OpenAI / fastembed / Voyage) |
+| `code-stats`       | Language / LOC summary via `tokei` → `scc` → `rg` fallback    |
+
+### ⚡ Background Tasks
+
+| Tool        | Description                            |
+| ----------- | -------------------------------------- |
+| `bg_spawn`  | Launch an agent as a background task   |
+| `bg_status` | Check status of background tasks       |
+| `bg_wait`   | Wait for a background task to complete |
+| `bg_cancel` | Cancel a running background task       |
+
+---
 
 ## Slash Commands
 
-| Command        | Description                                       | Agent          |
-| -------------- | ------------------------------------------------- | -------------- |
-| `/review`      | Run a code review on current changes              | sage (subtask) |
-| `/loop`        | Start an iterative development loop in a worktree | forge          |
-| `/loop-status` | Check status of all active loops                  | forge          |
-| `/loop-cancel` | Cancel the active loop                            | forge          |
+| Command        | Description                          | Agent |
+| -------------- | ------------------------------------ | ----- |
+| `/review`      | Run a code review on current changes | sage  |
+| `/loop`        | Start an iterative development loop  | forge |
+| `/loop-status` | Check status of all active loops     | forge |
+| `/loop-cancel` | Cancel the active loop               | forge |
+
+---
 
 ## CLI
-
-Manage loops and graph using the `oc-forgecode` CLI. The CLI auto-detects the project ID from git.
 
 ```bash
 oc-forgecode <command> [options]
 ```
 
-### Commands
+| Command                    | Description                                      |
+| -------------------------- | ------------------------------------------------ |
+| `doctor`                   | Validate config, DB, sandbox, and runtime health |
+| `upgrade`                  | Check for and install plugin updates             |
+| `stats`                    | Display session and loop statistics              |
+| `status [name]`            | Detailed loop status (iterations, tokens, phase) |
+| `cancel <name>`            | Cancel and clean up a worktree loop              |
+| `restart <name>`           | Resume a cancelled/failed loop                   |
+| `graph status`             | Show graph indexing state                        |
+| `graph scan`               | Trigger a full graph re-scan                     |
+| `graph list`               | List all cached graph indexes                    |
+| `graph remove <target>`    | Remove a specific graph cache                    |
+| `graph cleanup --days <n>` | Clean up caches older than N days                |
+| `ci`                       | Headless loop execution for CI/CD pipelines      |
+| `mcp`                      | MCP server management                            |
 
-#### upgrade
+**Global flags:** `--project, -p <name>` · `--dir, -d <path>` · `--db-path <path>` · `--help, -h`
 
-Check for plugin updates and install the latest version.
+---
 
-```bash
-oc-forgecode upgrade
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    OpenCode Host                         │
+│                                                          │
+│  opencode.json ──► plugin: ["opencode-forgecode@latest"] │
+└──────────────┬───────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────┐
+│              opencode-forgecode plugin                    │
+│                                                          │
+│  ┌─────────────────┐  ┌──────────────────────────────┐   │
+│  │  9 Agents        │  │  Hooks Pipeline              │   │
+│  │  forge·muse·sage │  │  chat.message                │   │
+│  │  explore·oracle  │  │  tool.execute.before/after   │   │
+│  │  librarian       │  │  event                       │   │
+│  │  prometheus      │  │  permission.ask              │   │
+│  │  metis·caveman   │  │  session.compacting          │   │
+│  └─────────────────┘  │  messages.transform           │   │
+│                        └──────────────────────────────┘   │
+│  ┌─────────────────┐  ┌──────────────────────────────┐   │
+│  │  Services        │  │  Runtime                     │   │
+│  │  KV Store        │  │  Budget Enforcer             │   │
+│  │  Loop Service    │  │  Session Recovery            │   │
+│  │  Graph Service   │  │  Telemetry Collector         │   │
+│  │  Sandbox Manager │  │  Intent Router               │   │
+│  │  LSP Pool        │  │  Restricted Shell            │   │
+│  │  Background Mgr  │  │  Skill Loader                │   │
+│  │  MCP Registry    │  │  Context Injection           │   │
+│  │  Host Tools (rg) │  │  Search Renderer             │   │
+│  └─────────────────┘  └──────────────────────────────┘   │
+│                                                          │
+│  ┌───────────────────────────────────────────────────┐   │
+│  │  Storage: SQLite (KV + Graph + Telemetry)         │   │
+│  │  ~/.local/share/opencode/forge/                   │   │
+│  └───────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────┘
 ```
 
-#### loop
+### Key Design Decisions
 
-```bash
-oc-forgecode loop status
-oc-forgecode loop cancel <worktree>
-oc-forgecode loop restart <worktree> [--force] [--server http://localhost:5551]
-```
+- **Leader/Follower graph** — Multiple plugin instances (e.g., across worktrees) coordinate via a lock file + Unix domain socket IPC. Only the leader writes; followers read over RPC.
+- **Soft-fail everywhere** — If the DB can't open, the plugin falls back to in-memory KV. If the graph can't initialize, tools gracefully report "unavailable". Nothing crashes the session.
+- **Per-agent budgets** — `AgentBudgetEnforcer` tracks turns, tokens, requests, and tool failures per agent with configurable `warn` → `stop` policies.
+- **Session recovery** — `SessionRecoveryManager` handles context-overflow, timeouts, and overload errors with automatic retry and model fallback chains.
+- **Host-side fast tools** — When `rg` (ripgrep) is available, `grep`/`glob` tool calls are intercepted before reaching the sandbox and served via ripgrep with submatch-windowed, grouped output — reducing token usage and latency.
 
-#### graph
-
-```bash
-oc-forgecode graph status
-oc-forgecode graph scan
-oc-forgecode graph list
-oc-forgecode graph remove <target>
-oc-forgecode graph cleanup --days <n> [--yes]
-```
-
-Global flags: `--project, -p <name>`, `--dir, -d <path>`, `--db-path <path>`, `--help, -h`.
+---
 
 ## Configuration
 
-On first run, the plugin copies the bundled config to `~/.config/opencode/forge-config.jsonc`. The file is JSONC (supports `//` and `/* */` comments).
+The plugin config lives at `~/.config/opencode/forge-config.jsonc` (JSONC format — comments allowed).
+
+### Essential Settings
 
 ```jsonc
 {
+	// Storage (empty = ~/.local/share/opencode/forge)
 	"dataDir": "",
-	"logging": { "enabled": false, "debug": false, "file": "" },
-	"compaction": { "customPrompt": true, "maxContextTokens": 0 },
-	"messagesTransform": { "enabled": true, "debug": false },
-	"executionModel": "",
-	"auditorModel": "",
+
+	// Logging
+	"logging": { "enabled": false, "debug": false },
+
+	// Graph indexing
+	"graph": {
+		"enabled": true,
+		"autoScan": true, // Scan on startup
+		"watch": true, // Watch for file changes
+		"debounceMs": 100,
+	},
+
+	// Iterative loops
 	"loop": {
 		"enabled": true,
 		"defaultMaxIterations": 15,
-		"cleanupWorktree": false,
 		"defaultAudit": true,
-		"model": "",
-		"minAudits": 1,
+		"cleanupWorktree": false,
 		"stallTimeoutMs": 60000,
 	},
-	"sandbox": { "mode": "off", "image": "oc-forge-sandbox:latest" },
-	"graph": { "enabled": true, "autoScan": true, "watch": true, "debounceMs": 100 },
-	"tui": { "sidebar": true, "showLoops": true, "showVersion": true },
-	"defaultKvTtlMs": 604800000,
 
-	// Harness block — ForgeCode runtime behavior
+	// Sandbox (off | docker | sandbox-exec | bubblewrap | firejail)
+	"sandbox": { "mode": "off", "image": "oc-forge-sandbox:latest" },
+
+	// Harness (doom-loop, truncation, snapshots, compaction)
 	"harness": {
-		"enabled": true, // Master switch. false disables all harness hooks.
-		"doomLoopThreshold": 3, // Consecutive tool repetitions before firing a reminder
-		"pendingTodosReminder": true, // Remind about pending todos on session.idle
-		"snapshots": true, // Capture .bak snapshots before write/edit/multi_patch
-		"compaction": true, // Use summary-frame compaction (overrides output.prompt)
-		"truncation": { "enabled": true }, // Trim long shell/search/fetch outputs
+		"enabled": true,
+		"doomLoopThreshold": 3,
+		"pendingTodosReminder": true,
+		"snapshots": true,
+		"compaction": true,
+		"hashAnchoredPatch": true,
+		"truncation": { "enabled": true },
 	},
 }
 ```
 
-### Harness Options
+### Advanced Settings
 
-- `harness.enabled` — Master switch. Set to `false` to disable every harness hook (doom-loop, pending-todos, snapshots, compaction override, truncation). Default `true`.
-- `harness.doomLoopThreshold` — Number of consecutive identical/cyclic tool invocations before the doom-loop reminder fires. Default `3`.
-- `harness.pendingTodosReminder` — When `true`, a reminder with outstanding todos is appended to the TUI prompt on `session.idle` or `session.completed`. Default `true`.
-- `harness.snapshots` — Capture `<dataDir>/snapshots/<session>/<ts>-<tag>.bak` before every `write` / `edit` / `multi_patch`. Used by `fs_undo`. Default `true`.
-- `harness.compaction` — Override `experimental.session.compacting.output.prompt` with the ported summary-frame. When harness does not set a prompt (e.g. session has no cached messages), the plugin falls back to forge's `buildCustomCompactionPrompt`. Default `true`.
-- `harness.truncation.enabled` — Trim long tool outputs in `tool.execute.after`. Caps: shell 200 lines head + 200 tail + 2000 chars/line; search 500 lines; fetch 40 000 chars. Default `true`.
+<details>
+<summary><b>Per-agent budgets</b></summary>
 
-### Forge Options
+```jsonc
+{
+	"agents": {
+		"forge": {
+			"budget": {
+				"maxTurns": 50,
+				"maxTokensPerSession": 500000,
+				"maxToolFailuresPerTurn": 5,
+			},
+		},
+	},
+}
+```
 
-#### Top-level
+</details>
 
-- `dataDir` — Data dir for plugin storage (graph.db, KV store, logs, harness snapshots). Empty → `~/.local/share/opencode/forge`.
-- `defaultKvTtlMs` — Default TTL for KV entries (default `604800000` / 7 days).
-- `executionModel` — `provider/model` override for plan-execute sessions.
-- `auditorModel` — `provider/model` override for the sage agent (review-mode invocations). Kept as `auditorModel` for backwards compatibility.
-- `agents` — Per-agent temperature overrides keyed by display name.
+<details>
+<summary><b>Fallback models</b></summary>
 
-#### Logging
+```jsonc
+{
+	"agents": {
+		"forge": {
+			"fallbackModels": [
+				{ "provider": "anthropic", "model": "claude-sonnet-4" },
+				{ "provider": "openai", "model": "gpt-5.4-mini" },
+			],
+		},
+	},
+}
+```
 
-- `logging.enabled`, `logging.debug`, `logging.file`.
+</details>
 
-#### Compaction
+<details>
+<summary><b>Restricted shell</b></summary>
 
-- `compaction.customPrompt` — Use forge's custom compaction prompt. Used as a fallback when `harness.compaction=true` has no cached messages.
-- `compaction.maxContextTokens` — Token budget (`0` = unlimited).
+```jsonc
+{
+	"restrictedShell": {
+		"enabled": true,
+		"dangerousPatterns": ["rm -rf /", ":(){ :|:& };:"],
+		"allowlist": ["npm test", "bun test", "make"],
+	},
+}
+```
 
-#### Messages Transform
+</details>
 
-- `messagesTransform.enabled`, `messagesTransform.debug`.
+<details>
+<summary><b>Context injection</b></summary>
 
-#### Loop
+```jsonc
+{
+	"contextInjection": {
+		"enabled": true,
+		"rules": [
+			{
+				"pattern": "**/*.test.ts",
+				"content": "Follow the testing conventions in TESTING.md",
+				"priority": 10,
+			},
+		],
+	},
+}
+```
 
-- `loop.enabled`, `loop.defaultMaxIterations`, `loop.cleanupWorktree`, `loop.defaultAudit`, `loop.model`, `loop.stallTimeoutMs`, `loop.minAudits`.
+</details>
 
-#### Sandbox
+<details>
+<summary><b>Skill loader</b></summary>
 
-- `sandbox.mode` (`"off"` | `"docker"`), `sandbox.image`.
+```jsonc
+{
+	"skills": {
+		"enabled": true,
+		"directories": [".opencode/skills", "~/.config/opencode/skills"],
+	},
+}
+```
 
-#### Graph
+</details>
 
-- `graph.enabled`, `graph.autoScan`, `graph.watch`, `graph.debounceMs`.
+<details>
+<summary><b>LSP integration</b></summary>
 
-#### TUI
+```jsonc
+{
+	"lsp": {
+		"enabled": true,
+		"servers": {
+			"typescript": { "command": "typescript-language-server", "args": ["--stdio"] },
+			"python": { "command": "pylsp" },
+		},
+	},
+}
+```
 
-- `tui.sidebar`, `tui.showLoops`, `tui.showVersion`.
+</details>
 
-## Compatibility
+<details>
+<summary><b>Host-side fast tools (ripgrep)</b></summary>
 
-| Plugin | Recommendation | Why |
+```jsonc
+{
+	"host": {
+		// When true and `rg` is on PATH, intercept grep/glob tool calls
+		// and serve them via ripgrep with grouped, submatch-windowed output.
+		// Defaults to true.
+		"fastGrep": true,
+	},
+}
+```
+
+</details>
+
+<details>
+<summary><b>Background tasks</b></summary>
+
+```jsonc
+{
+	"background": {
+		"enabled": true,
+		"maxConcurrent": 5,
+		"perModelLimit": 2,
+		"pollIntervalMs": 3000,
+		"idleTimeoutMs": 10000,
+	},
+}
+```
+
+</details>
+
+<details>
+<summary><b>Telemetry (local-only, opt-in)</b></summary>
+
+```jsonc
+{
+	"telemetry": {
+		"enabled": true, // SQLite-backed, never leaves your machine
+	},
+}
+```
+
+</details>
+
+<details>
+<summary><b>Built-in MCPs</b></summary>
+
+```jsonc
+{
+	"mcp": {
+		"websearch": { "provider": "tavily", "apiKey": "tvly-..." },
+		"context7": { "apiKey": "..." },
+		"grepApp": { "enabled": true },
+	},
+}
+```
+
+</details>
+
+### All Config Options Reference
+
+| Section | Key | Default | Description |
+| --- | --- | --- | --- |
+| — | `dataDir` | `~/.local/share/opencode/forge` | Plugin data directory |
+| — | `defaultKvTtlMs` | `604800000` (7d) | Default TTL for KV entries |
+| `logging` | `enabled` / `debug` / `file` | `false` / `false` / auto | File-based logging |
+| `graph` | `enabled` / `autoScan` / `watch` / `debounceMs` | `true` / `true` / `true` / `100` | Code graph indexing |
+| `loop` | `enabled` / `defaultMaxIterations` / `defaultAudit` / `cleanupWorktree` / `stallTimeoutMs` / `minAudits` | `true` / `15` / `true` / `false` / `60000` / `1` | Loop execution |
+| `sandbox` | `mode` / `image` | `"off"` / `"oc-forge-sandbox:latest"` | Sandboxed execution |
+| `harness` | `enabled` / `doomLoopThreshold` / `pendingTodosReminder` / `snapshots` / `compaction` / `hashAnchoredPatch` | `true` / `3` / `true` / `true` / `true` / `true` | Harness runtime |
+| `harness.truncation` | `enabled` | `true` | Output truncation (shell 200+200 lines @ 500 chars/line, search 200 lines @ 400 chars/line, fetch 40K chars) |
+| `compaction` | `customPrompt` / `maxContextTokens` | `true` / `0` | Summary-frame compaction fallback |
+| `messagesTransform` | `enabled` / `debug` | `true` / `false` | Message pipeline |
+| `host` | `fastGrep` | `true` | Intercept grep/glob via ripgrep when `rg` is on PATH |
+
+---
+
+## Harness Features
+
+### Doom-Loop Detection
+
+Tracks tool call signatures per session. When it detects 3+ consecutive identical or cyclic patterns, it injects a reminder via `tui.appendPrompt` asking the agent to change strategy.
+
+### Output Truncation
+
+Automatically trims long tool output in `tool.execute.after`:
+
+- **Shell/bash**: 200 lines head + 200 lines tail, 500 chars/line max
+- **Search/grep**: 200 lines max, 400 chars/line max (with per-file match distribution banner)
+- **Web fetch**: 40,000 chars max
+
+### Summary-Frame Compaction
+
+Overrides `experimental.session.compacting` with an intelligent summary frame that preserves key context, decisions, and in-progress state. Falls back to a custom compaction prompt when no cached messages are available.
+
+### Undo Snapshots
+
+Before every `write` / `edit` / `multi_patch` / `patch`, the harness snapshots the file at:
+
+```
+<dataDir>/snapshots/<sessionId>/<timestamp>-<fileTag>.bak
+```
+
+Restore with:
+
+```
+fs_undo file="src/foo.ts"            # latest snapshot
+fs_undo file="src/foo.ts" steps=3    # 3 versions back
+```
+
+### Pending-Todos Reminder
+
+Tracks `todo.updated` events. When a session goes idle with pending or in-progress todos, appends a reminder with the outstanding items.
+
+### Host-Side Fast Tools
+
+When `rg` (ripgrep) is on PATH, the plugin intercepts `grep` and `glob` tool calls before they reach the sandbox and serves them via ripgrep. This provides:
+
+- **Submatch-windowed output** — only ±30 chars around each match are returned, dramatically reducing token consumption on large files
+- **Grouped results** — matches are grouped by file with a per-file match distribution banner
+- **Automatic fallback** — if `rg` isn't available or a sandbox is active, calls pass through to the default implementation
+
+Disable with `"host": { "fastGrep": false }` in `forge-config.jsonc`.
+
+---
+
+## Plugin Compatibility
+
+| Plugin | Status | Notes |
 | --- | --- | --- |
-| `opencode-forgecode` | **Use** | This plugin. Owns compaction, doom-loop, pending-todos, loops, plans, graph, sandbox, and the agent set. |
-| `@plannotator/opencode` | Usually safe | Planning / todo layer complements the forge plan store. |
-| `opencode-forge` (upstream) | **Do not stack** | `opencode-forgecode` already contains everything from `opencode-forge`. Running both doubles loop hooks and graph scans. |
-| `@tarquinen/opencode-dcp` | Optional for long sessions | Safe when used as proactive pruning/compression with protected forgecode tools. Keep OpenCode compaction enabled so forgecode still owns the final summary-frame compaction step. |
+| `opencode-forgecode` | ✅ **This plugin** | Owns compaction, hooks, agents, tools |
+| `@plannotator/opencode` | ✅ Compatible | Planning layer complements forge plans |
+| `opencode-forge` (upstream) | ❌ **Do not stack** | Already included — running both doubles hooks and graph scans |
+| `@tarquinen/opencode-dcp` | ⚠️ Optional | Safe as upstream pruning layer. Let forgecode own final compaction |
 
-Main collision points:
+**Rule of thumb:** `opencode-forgecode` must own the final `experimental.session.compacting` prompt. If using DCP, treat it as proactive pruning only.
 
-- `experimental.session.compacting`
-- `tool.execute.before` / `tool.execute.after`
-- `experimental.chat.messages.transform`
-- `event` handlers touching todos / sessions
-- `tui.appendPrompt`
+---
 
-Rule: let `opencode-forgecode` own the **final** compaction prompt (`experimental.session.compacting`). If you also enable DCP, treat it as an upstream pruning layer, not a replacement for forgecode compaction.
+## GitHub Actions / CI
 
-## Snapshots and Undo
+Use the built-in CI mode for headless loop execution in pipelines:
 
-Harness snapshots live at `<dataDir>/snapshots/<sessionId>/<ts>-<fileTag>.bak`. The file tag is the workspace-relative path with non-alphanumerics replaced by underscores. To restore:
-
-```
-fs_undo file="src/foo.ts"            # newest snapshot
-fs_undo file="src/foo.ts" steps=3    # 3rd newest
+```yaml
+- name: Run forge loop
+  run: npx oc-forgecode ci --task "Fix failing tests" --output json
 ```
 
-Snapshots are never deleted automatically. Clean old data-dir sessions manually if they grow large.
+Supports `--output json|markdown|text` and automatic PR comment posting.
 
-## TUI
-
-See the `tui` config block above. The sidebar shows all loops for the current project, a `📋 Plan` link when a session plan is cached, and a command-palette entry `Memory: Show loops`.
-
-The execution dialog lets you choose a launch mode (**New session**, **Execute here**, **Loop (worktree)**, **Loop**) and pre-fills model selections based on last-used values (30-day TTL per project).
+---
 
 ## Development
 
 ```bash
 bun install
-bun run typecheck
-bun run lint
-bun test --max-concurrency=1
-bun run build           # emits dist/
+bun run typecheck        # TypeScript type checking
+bun run lint             # Linting
+bun test                 # 756+ tests
+bun run build            # Emit dist/
 ```
 
-The test suite covers 844 cases across forge features and the 52 harness-specific unit and integration tests.
+### Project Stats
+
+| Metric                           | Value                 |
+| -------------------------------- | --------------------- |
+| Source files                     | ~178 TypeScript files |
+| Exported functions/classes/types | ~773                  |
+| Test cases                       | 756+ passing          |
+| Agents                           | 9                     |
+| Tools                            | 30+                   |
+| Hooks                            | 16                    |
+
+---
 
 ## License
 

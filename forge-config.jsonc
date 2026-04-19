@@ -61,6 +61,88 @@
 		"debounceMs": 100,
 	},
 
+	// The sections below are config placeholders for planned runtime capability.
+	// Enabling them before implementation will trigger startup warnings and
+	// `oc-forgecode doctor` will report them as unsupported.
+	// Each section's stage is referenced from `plans/master-plan.md`.
+
+	// Background task runtime configuration. Wired in Stage 6a.
+	"background": {
+		"enabled": false,
+		"maxConcurrent": 5,
+		"perModelLimit": 2,
+		"pollIntervalMs": 3000,
+		"idleTimeoutMs": 10000,
+	},
+
+	// Language Server Protocol integration. Wired in Stage 5b.
+	"lsp": {
+		"enabled": false,
+		"servers": {},
+	},
+
+	// AST-aware tooling (ast-grep wrapper). Wired in Stage 5a.
+	"ast": {
+		"enabled": false,
+		"binary": "sg",
+	},
+
+	// Host-side fast-path tool interception (ripgrep-based grep/glob).
+	// When enabled and `rg` is on PATH, grep/glob tool calls are intercepted
+	// on the host and served via ripgrep with grouped, submatch-windowed output.
+	// Skipped automatically when a sandbox is active. Defaults to true.
+	"host": {
+		"fastGrep": true,
+	},
+
+	// Runtime skill loading. Module ready (`src/runtime/skill-loader.ts`); wired in Stage 4c.
+	"skills": {
+		"enabled": false,
+		"scopes": [],
+	},
+
+	// Intent routing before agent execution.
+	// Module ready (`src/runtime/intent-router.ts`); wired in Stage 4d.
+	"intentGate": {
+		"enabled": false,
+		"model": "",
+		"heuristicsOnly": true,
+	},
+
+	// Automatic context injection on session start.
+	// Module ready (`src/runtime/context-injection.ts`); wired in Stage 4b.
+	"contextInjection": {
+		"enabled": false,
+		"files": [],
+		"conditionalRules": [],
+	},
+
+	// Restrict shell commands per agent via allowlists.
+	// Module ready (`src/runtime/restricted-shell.ts`); wired in Stage 4a.
+	"restrictedShell": {
+		"enabled": false,
+		"whitelist": {},
+	},
+
+	// Local-only telemetry and retention.
+	// Module ready (`src/runtime/telemetry.ts`); wired in Stage 3.
+	"telemetry": {
+		"enabled": false,
+		"retentionDays": 30,
+	},
+
+	// RTK (Rust Token Killer) — token-optimized shell command proxy.
+	// https://github.com/rtk-ai/rtk
+	// When enabled, agents are instructed to prefix shell commands with `rtk`
+	// (e.g. `rtk git status`). If the `rtk` binary is missing from PATH and
+	// `autoInstall` is true, the upstream install script runs once at plugin
+	// init: `curl -fsSL <installUrl> | sh`.
+	"rtk": {
+		"enabled": true,
+		"autoInstall": true,
+		// "installUrl": "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh",
+	},
+
 	// Forge harness (system prompts, summary-frame compaction, truncation,
 	// doom-loop detection, pending-todo reminders, undo snapshots).
 	// If you also use DCP, leave this enabled so forgecode still owns the final
@@ -71,6 +153,7 @@
 		"pendingTodosReminder": true,
 		"snapshots": true,
 		"compaction": true,
+		"hashAnchoredPatch": true,
 		"truncation": {
 			"enabled": true,
 		},
@@ -89,8 +172,26 @@
 	// Per-agent overrides (temperature range: 0.0 - 2.0)
 	// Keys are agent display names: "forge", "muse", "sage"
 	"agents": {
-		"forge": { "temperature": 0.7 },
-		"muse": { "temperature": 0.0 },
-		"sage": { "temperature": 0.0 },
+		"forge": {
+			"temperature": 0.7,
+			"model": "",
+			"fallback_models": [],
+			"budget": {},
+			"user_prompt": "",
+		},
+		"muse": {
+			"temperature": 0.0,
+			"model": "",
+			"fallback_models": [],
+			"budget": {},
+			"user_prompt": "",
+		},
+		"sage": {
+			"temperature": 0.0,
+			"model": "",
+			"fallback_models": [],
+			"budget": {},
+			"user_prompt": "",
+		},
 	},
 }

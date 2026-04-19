@@ -106,6 +106,16 @@ const commands: Record<string, CommandModule> = {
 			help()
 		},
 	},
+	doctor: {
+		cli: async (_args, globalOpts) => {
+			const { cli } = await import('./commands/doctor')
+			await cli([], globalOpts)
+		},
+		help: async () => {
+			const { help } = await import('./commands/doctor')
+			help()
+		},
+	},
 	loop: {
 		cli: async (args, globalOpts) => {
 			const subcommandName = args[0]
@@ -152,6 +162,7 @@ Usage:
 
 Commands:
   upgrade         Check for and install plugin updates
+  doctor          Run environment and config diagnostics
   loop <command>  Manage iterative development loops
   graph <command> Check graph status or trigger a scan
 

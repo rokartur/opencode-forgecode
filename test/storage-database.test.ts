@@ -1,8 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { initializeDatabase, closeDatabase, resolveDataDir } from '../src/storage/database'
+import { initializeDatabase, closeDatabase } from '../src/storage/database'
 import { existsSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { Database } from 'bun:sqlite'
 
 const TEST_DATA_DIR = '/tmp/opencode-storage-db-test-' + Date.now()
 
