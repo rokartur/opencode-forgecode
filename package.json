@@ -1,6 +1,6 @@
 {
 	"name": "opencode-forgecode",
-	"version": "2.2.2",
+	"version": "2.2.3",
 	"description": "opencode-forgecode — forge loops, graph indexing, sandbox, plan storage, plus the forgecode harness (system prompts, summary-frame compaction, truncation, doom-loop, pending-todos, undo snapshots) and forge/sage/muse agents.",
 	"keywords": [
 		"ai-agent",
