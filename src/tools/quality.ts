@@ -7,8 +7,6 @@ import type { ToolContext } from './types'
 import type { QualityScorer } from '../harness/quality-score'
 import { formatQualityReport } from '../harness/quality-score'
 
-const z = tool.schema
-
 export function createQualityTools(
 	_ctx: ToolContext,
 	qualityScorer: QualityScorer | null,

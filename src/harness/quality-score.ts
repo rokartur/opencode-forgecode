@@ -99,10 +99,9 @@ const DEFAULT_MAX_TOKENS = 200_000
 
 export class QualityScorer {
 	private readonly sessions = new Map<string, SessionQualityState>()
-	private readonly logger: Logger
 
-	constructor(logger: Logger) {
-		this.logger = logger
+	constructor(_logger: Logger) {
+		// Logger reserved for future diagnostic output.
 	}
 
 	private state(sessionId: string): SessionQualityState {
@@ -134,7 +133,7 @@ export class QualityScorer {
 		}
 	}
 
-	recordLargeResult(sessionId: string, toolCallId: string): void {
+	recordLargeResult(sessionId: string, _toolCallId: string): void {
 		const s = this.state(sessionId)
 		s.largeResultCount++
 	}

@@ -42,6 +42,17 @@ const TIMEOUT_DEFAULTS_PROVIDERS = [
 const DEFAULT_REQUEST_TIMEOUT_MS = 600_000 // 10 min
 const DEFAULT_CHUNK_TIMEOUT_MS = 300_000 // 5 min silence between SSE chunks
 
+/**
+ * Returns true when the value looks like an intentional, positive timeout
+ * the user explicitly configured.  `false`, `null`, `undefined`, `0`, and
+ * non-number values are all treated as "not set" so we can inject our
+ * generous default.  This prevents configs like `"timeout": false` from
+ * silently disabling the safety net.
+ */
+function isExplicitTimeout(v: unknown): boolean {
+	return typeof v === 'number' && v > 0
+}
+
 function applyStreamTimeoutDefaults(config: Record<string, unknown>): void {
 	const providerSection = (config.provider ?? {}) as Record<string, unknown>
 
@@ -51,8 +62,8 @@ function applyStreamTimeoutDefaults(config: Record<string, unknown>): void {
 
 		// Only fill in values the user didn't set — never overwrite.
 		const options: Record<string, unknown> = { ...existingOptions }
-		if (options.timeout === undefined) options.timeout = DEFAULT_REQUEST_TIMEOUT_MS
-		if (options.chunkTimeout === undefined) options.chunkTimeout = DEFAULT_CHUNK_TIMEOUT_MS
+		if (!isExplicitTimeout(options.timeout)) options.timeout = DEFAULT_REQUEST_TIMEOUT_MS
+		if (!isExplicitTimeout(options.chunkTimeout)) options.chunkTimeout = DEFAULT_CHUNK_TIMEOUT_MS
 
 		providerSection[id] = { ...existing, options }
 	}
@@ -84,7 +95,7 @@ function applyAgentTimeoutDefaults(mergedAgents: Record<string, AgentConfig>): v
 			string,
 			unknown
 		>
-		if (existingOptions.timeout !== undefined) continue // user wins
+		if (isExplicitTimeout(existingOptions.timeout)) continue // user wins
 		mergedAgents[name] = {
 			...(agentCfg as AgentConfig),
 			options: {

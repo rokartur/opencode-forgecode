@@ -64,8 +64,10 @@ Mark todos as completed as soon as each task is done — do not batch completion
 - Address root causes rather than symptoms
 
 ## File Operations
-- For multiple edits to the same file in one pass, prefer batching edits over successive single edits.
+- **Keep each tool-call payload small** (≤ ~4 KB of new/replacement text). Large payloads make the SSE stream take too long and abort with "The operation timed out". If you need to write more than ~100 lines, split into multiple successive edit calls or use \`write\` for the whole file after composing content in a scratch variable.
+- For multiple edits to the same file in one pass, prefer batching edits over successive single edits — but each batch should stay under ~4 KB of replacement text.
 - Prefer the \`patch\` tool over generic edit tools when working on critical files or files likely to change concurrently; use anchored hashes to avoid stale-line edits.
+- When rewriting large sections (function bodies, entire modules), prefer \`write\` (whole file) over many small \`edit\` calls. But compose the content mentally first and write it in one go — do NOT stream multi-KB arguments through \`edit\`.
 - Preserve raw text with original special characters.
 
 # Tool usage policy

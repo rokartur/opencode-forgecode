@@ -258,7 +258,7 @@ describe('createConfigHandler', () => {
 			expect(provider.anthropic?.options?.chunkTimeout).toBe(300_000)
 		})
 
-		test('user-set provider options are NOT overwritten', async () => {
+		test('user-set provider options with valid positive numbers are NOT overwritten', async () => {
 			const configHandler = createConfigHandler(agents)
 			const config: Record<string, unknown> = {
 				provider: {
@@ -274,6 +274,23 @@ describe('createConfigHandler', () => {
 			expect(provider.openai?.options?.apiKey).toBe('sk-user')
 			expect(provider.openai?.options?.timeout).toBe(42_000)
 			expect(provider.openai?.options?.chunkTimeout).toBe(9_000)
+		})
+
+		test('falsy provider timeout values (false/0/null) are overwritten with defaults', async () => {
+			const configHandler = createConfigHandler(agents)
+			const config: Record<string, unknown> = {
+				provider: {
+					openai: {
+						options: { timeout: false, chunkTimeout: 0 },
+					},
+				},
+			}
+
+			await configHandler(config)
+
+			const provider = config.provider as Record<string, { options?: Record<string, unknown> }>
+			expect(provider.openai?.options?.timeout).toBe(600_000)
+			expect(provider.openai?.options?.chunkTimeout).toBe(300_000)
 		})
 
 		test('partial user options are merged: missing timeout key gets default', async () => {
@@ -318,7 +335,7 @@ describe('createConfigHandler', () => {
 			expect(agentCfg.muse?.options?.timeout).toBe(300_000)
 		})
 
-		test('user-set agent.options.timeout is NOT overwritten', async () => {
+		test('user-set agent.options.timeout with valid positive number is NOT overwritten', async () => {
 			const configHandler = createConfigHandler(agents)
 			const config: Record<string, unknown> = {
 				agent: {
@@ -331,6 +348,22 @@ describe('createConfigHandler', () => {
 			const agentCfg = config.agent as Record<string, { options?: Record<string, unknown> }>
 			expect(agentCfg.forge?.options?.timeout).toBe(42_000)
 			expect(agentCfg.forge?.options?.foo).toBe('bar')
+		})
+
+		test('falsy agent.options.timeout values (false/0/null) are overwritten with defaults', async () => {
+			const configHandler = createConfigHandler(agents)
+			const config: Record<string, unknown> = {
+				agent: {
+					forge: { options: { timeout: false } },
+					muse: { options: { timeout: 0 } },
+				},
+			}
+
+			await configHandler(config)
+
+			const agentCfg = config.agent as Record<string, { options?: Record<string, unknown> }>
+			expect(agentCfg.forge?.options?.timeout).toBe(300_000)
+			expect(agentCfg.muse?.options?.timeout).toBe(300_000)
 		})
 	})
 })
