@@ -106,6 +106,37 @@ describe('session-retry hook', () => {
 		expect(calls.length).toBe(0)
 	})
 
+	test('retries MessageAbortedError when message indicates a stream timeout', async () => {
+		// Provider stream-timeouts (e.g. tool-call args like a big `patch` payload
+		// that times out mid-stream, surfaces in the TUI as
+		// "~ Preparing patch... / Tool execution aborted / The operation timed out")
+		// share the MessageAbortedError name with a user Esc. Disambiguate by
+		// message content.
+		const hooks = createSessionRetryHooks({
+			loopService: makeLoopService(null),
+			v2: makeV2(calls),
+			directory: '/tmp',
+			logger: makeLogger(),
+			backoffMs: 1,
+		})
+		hooks.onMessagesTransform({ messages: [userMessage('s1', 'm1', 'hello', 'forge')] })
+		await hooks.onEvent({
+			event: {
+				type: 'session.error',
+				properties: {
+					sessionID: 's1',
+					error: {
+						name: 'MessageAbortedError',
+						data: { message: 'Tool execution aborted. The operation timed out.' },
+					},
+				},
+			},
+		})
+		expect(calls.length).toBe(1)
+		expect(calls[0].sessionID).toBe('s1')
+		expect(calls[0].agent).toBe('forge')
+	})
+
 	test('does not retry non-timeout errors', async () => {
 		const hooks = createSessionRetryHooks({
 			loopService: makeLoopService(null),

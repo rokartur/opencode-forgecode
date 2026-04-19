@@ -83,13 +83,22 @@ export function createSessionRetryHooks(deps: SessionRetryHookDeps): SessionRetr
 			if (deps.loopService.resolveLoopName(sessionId)) return
 
 			const errorName = errorProps?.error?.name ?? ''
-			// User abort (Esc) looks the same as a stream abort. Only proceed when
-			// we can be reasonably sure it is NOT a user abort.
-			if (errorName === 'MessageAbortedError' || errorName === 'AbortError') return
-
 			const errorMessage = errorProps?.error?.data?.message ?? errorName
+			// Provider stream-timeouts (e.g. tool-call args taking too long to stream,
+			// surfaces in the TUI as "Tool execution aborted / The operation timed out")
+			// frequently bubble up with `name === 'MessageAbortedError'` — the same
+			// name the server uses for a user Esc. Distinguish them by the message:
+			// a real user abort has no timeout-y text, while stream timeouts carry
+			// "timed out", "operation timed out", "deadline exceeded", etc.
+			const looksLikeTimeoutMessage =
+				/timed out|timeout|operation timed out|deadline exceeded|etimedout|econnreset|stream.*(abort|closed|ended)/i.test(
+					errorMessage,
+				)
+			const isAbortName = errorName === 'MessageAbortedError' || errorName === 'AbortError'
+			if (isAbortName && !looksLikeTimeoutMessage) return
+
 			const classified = classifyModelError(errorMessage)
-			if (classified.kind !== 'timeout') return
+			if (classified.kind !== 'timeout' && !(isAbortName && looksLikeTimeoutMessage)) return
 
 			const entry = lastPrompt.get(sessionId)
 			if (!entry) {
