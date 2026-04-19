@@ -26,6 +26,9 @@ export type LoopInfo = {
 	worktreeDir?: string
 	executionModel?: string
 	auditorModel?: string
+	totalTokens?: number
+	totalCostUsd?: number
+	modelFailed?: boolean
 }
 
 /**
@@ -77,6 +80,9 @@ export function readLoopStates(projectId: string, dbPathOverride?: string): Loop
 					worktreeDir: state.worktreeDir,
 					executionModel: state.executionModel,
 					auditorModel: state.auditorModel,
+					totalTokens: state.totalTokens,
+					totalCostUsd: state.totalCostUsd,
+					modelFailed: state.modelFailed,
 				})
 			} catch {}
 		}
@@ -133,6 +139,9 @@ export function readLoopByName(projectId: string, loopName: string, dbPathOverri
 			worktreeDir: state.worktreeDir,
 			executionModel: state.executionModel,
 			auditorModel: state.auditorModel,
+			totalTokens: state.totalTokens,
+			totalCostUsd: state.totalCostUsd,
+			modelFailed: state.modelFailed,
 		}
 	} catch {
 		return null
@@ -164,4 +173,105 @@ export function shouldPollSidebar(loops: LoopInfo[], graphStatus: GraphStatusPay
 		graphStatus !== null && (graphStatus.state === 'initializing' || graphStatus.state === 'indexing')
 
 	return hasActiveWorktreeLoops || isGraphTransient
+}
+
+export type BackgroundTaskSummary = {
+	id: string
+	targetAgent: string
+	status: string
+	summary: string
+}
+
+/**
+ * Reads a lightweight summary of running/pending background tasks from the DB.
+ * Returns an empty array if the table doesn't exist or the DB is unavailable.
+ */
+export function readBackgroundTasks(dbPathOverride?: string): BackgroundTaskSummary[] {
+	const dbPath = dbPathOverride || getDbPath()
+	if (!existsSync(dbPath)) return []
+
+	let db: Database | null = null
+	try {
+		db = new Database(dbPath, { readonly: true })
+		const rows = db
+			.prepare(
+				`SELECT id, target_agent, status, summary FROM background_tasks
+				 WHERE status IN ('pending', 'running')
+				 ORDER BY created_at DESC LIMIT 20`,
+			)
+			.all() as Array<{ id: string; target_agent: string; status: string; summary: string }>
+
+		return rows.map(r => ({
+			id: r.id,
+			targetAgent: r.target_agent,
+			status: r.status,
+			summary: r.summary,
+		}))
+	} catch {
+		return []
+	} finally {
+		try {
+			db?.close()
+		} catch {}
+	}
+}
+
+export type BudgetSnapshotSummary = {
+	agent: string
+	sessionId: string
+	state: { turns: number; toolFailures: number; requests: number; tokensUsed: number }
+	budget: {
+		maxTurns?: number
+		maxToolFailuresPerTurn?: number
+		maxRequestsPerTurn?: number
+		maxTokensPerSession?: number
+	} | null
+	warnings: string[]
+	violations: string[]
+	updatedAt: number
+}
+
+/**
+ * Reads current budget snapshots (one per agent+session pair) from the
+ * project KV store. Only returns entries updated within the last 10 min
+ * to avoid stale indicators. Empty array if DB/store unavailable.
+ *
+ * Optional sessionId filter narrows to one session.
+ */
+export function readBudgetSnapshots(
+	projectId: string,
+	sessionId?: string,
+	dbPathOverride?: string,
+): BudgetSnapshotSummary[] {
+	const dbPath = dbPathOverride || getDbPath()
+	if (!existsSync(dbPath)) return []
+
+	const freshCutoff = Date.now() - 10 * 60 * 1000
+	let db: Database | null = null
+	try {
+		db = new Database(dbPath, { readonly: true })
+		const now = Date.now()
+		const stmt = db.prepare(
+			'SELECT key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?',
+		)
+		const rows = stmt.all(projectId, 'budget:%', now) as Array<{ key: string; data: string }>
+
+		const out: BudgetSnapshotSummary[] = []
+		for (const row of rows) {
+			try {
+				const snap = JSON.parse(row.data) as BudgetSnapshotSummary
+				if (!snap.agent || !snap.sessionId) continue
+				if (sessionId && snap.sessionId !== sessionId) continue
+				if (typeof snap.updatedAt !== 'number' || snap.updatedAt < freshCutoff) continue
+				out.push(snap)
+			} catch {}
+		}
+		return out
+	} catch {
+		return []
+	} finally {
+		try {
+			db?.close()
+		} catch {}
+	}
 }

@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHarnessHooks, type HarnessHooks } from '../src/hooks/harness'
@@ -66,15 +66,17 @@ describe('createHarnessHooks — snapshot capture', () => {
 		expect(stored).toBe('original content')
 	})
 
-	test('captures snapshot for write and multi_patch', async () => {
+	test('captures snapshot for write, multi_patch, and patch', async () => {
 		await writeFile(join(workDir, 'a.txt'), 'A')
 		await writeFile(join(workDir, 'b.txt'), 'B')
+		await writeFile(join(workDir, 'c.txt'), 'C')
 
 		await hooks.toolBefore({ sessionID: 's', tool: 'write', args: { filePath: 'a.txt' } })
 		await hooks.toolBefore({ sessionID: 's', tool: 'multi_patch', args: { file: 'b.txt' } })
+		await hooks.toolBefore({ sessionID: 's', tool: 'patch', args: { file: 'c.txt' } })
 
 		const entries = await readdir(join(dataDir, 'snapshots', 's'))
-		expect(entries.length).toBe(2)
+		expect(entries.length).toBe(3)
 	})
 
 	test('does not snapshot for non-mutating tools', async () => {

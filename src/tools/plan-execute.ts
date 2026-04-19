@@ -1,6 +1,6 @@
 import { tool } from '@opencode-ai/plugin'
 import type { ToolContext } from './types'
-import { parseModelString, retryWithModelFallback } from '../utils/model-fallback'
+import { parseModelString, resolveFallbackModelEntries, retryWithModelFallback } from '../utils/model-fallback'
 
 const z = tool.schema
 
@@ -41,18 +41,19 @@ export function createPlanExecuteTools(ctx: ToolContext): Record<string, ReturnT
 
 				const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
 				const executionModel = parseModelString(config.executionModel)
+				const forgeFallbackModels = resolveFallbackModelEntries(config.agents?.forge?.fallback_models)
 
 				if (args.inPlace) {
 					const inPlacePrompt = `The muse agent has created an implementation plan in this conversation above. You are now the forge agent taking over this session. Your job is to execute the plan — edit files, run commands, create tests, and implement every phase. Do NOT just describe or summarize the changes. Actually make them.\n\nPlan reference: ${planText}`
 
 					const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
-						() =>
+						candidate =>
 							v2.session.promptAsync({
 								sessionID: context.sessionID,
 								directory,
 								agent: 'forge',
 								parts: [{ type: 'text' as const, text: inPlacePrompt }],
-								...(executionModel ? { model: executionModel } : {}),
+								model: candidate,
 							}),
 						() =>
 							v2.session.promptAsync({
@@ -63,6 +64,7 @@ export function createPlanExecuteTools(ctx: ToolContext): Record<string, ReturnT
 							}),
 						executionModel,
 						logger,
+						{ fallbackModels: forgeFallbackModels },
 					)
 
 					if (promptResult.error) {
@@ -88,13 +90,13 @@ export function createPlanExecuteTools(ctx: ToolContext): Record<string, ReturnT
 				logger.log(`plan-execute: created session=${newSessionId}`)
 
 				const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
-					() =>
+					candidate =>
 						v2.session.promptAsync({
 							sessionID: newSessionId,
 							directory,
 							parts: [{ type: 'text' as const, text: planText }],
 							agent: 'forge',
-							model: executionModel!,
+							model: candidate,
 						}),
 					() =>
 						v2.session.promptAsync({
@@ -105,6 +107,7 @@ export function createPlanExecuteTools(ctx: ToolContext): Record<string, ReturnT
 						}),
 					executionModel,
 					logger,
+					{ fallbackModels: forgeFallbackModels },
 				)
 
 				if (promptResult.error) {

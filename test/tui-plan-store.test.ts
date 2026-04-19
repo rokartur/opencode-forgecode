@@ -126,8 +126,8 @@ describe('TUI Plan Store', () => {
 		})
 
 		test('Handles JSON-encoded strings correctly', () => {
-			const now = Date.now()
-			const ttl = 7 * 24 * 60 * 60 * 1000
+			const _now = Date.now()
+			const _ttl = 7 * 24 * 60 * 60 * 1000
 
 			// The helper stores content as JSON.stringify(content), then unwraps on read
 			// This test verifies the round-trip works correctly

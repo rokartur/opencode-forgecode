@@ -9,3 +9,4 @@ export {
 export { createLoopEventHandler, type LoopEventHandler } from './loop'
 export { createGraphToolAfterHook } from './graph-tools'
 export { createHarnessHooks, type HarnessHooks } from './harness'
+export { createCommentCheckerHooks, type CommentCheckerHooks } from './comment-checker'

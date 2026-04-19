@@ -74,8 +74,8 @@ describe('createForgePlugin', () => {
 		const cacheHash1 = hashGraphCacheScope(TEST_PROJECT_ID, worktree1Dir)
 		const cacheHash2 = hashGraphCacheScope(TEST_PROJECT_ID, worktree2Dir)
 
-		const dbPath1 = join(sharedDataDir, 'graph', cacheHash1, 'graph.db')
-		const dbPath2 = join(sharedDataDir, 'graph', cacheHash2, 'graph.db')
+		const _dbPath1 = join(sharedDataDir, 'graph', cacheHash1, 'graph.db')
+		const _dbPath2 = join(sharedDataDir, 'graph', cacheHash2, 'graph.db')
 
 		expect(cacheHash1).not.toBe(cacheHash2)
 

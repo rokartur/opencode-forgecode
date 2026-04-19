@@ -3,8 +3,15 @@ import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { LoopService, LoopState } from '../services/loop'
 import { MAX_RETRIES, MAX_CONSECUTIVE_STALLS } from '../services/loop'
 import type { Logger, PluginConfig } from '../types'
-import { retryWithModelFallback } from '../utils/model-fallback'
-import { resolveLoopModel, resolveLoopAuditorModel } from '../utils/loop-helpers'
+import { classifyModelError, retryWithModelFallback } from '../utils/model-fallback'
+import type { SessionRecoveryManager } from '../runtime/session-recovery'
+import type { TelemetryCollector } from '../runtime/telemetry'
+import {
+	resolveLoopModel,
+	resolveLoopModelFallbacks,
+	resolveLoopAuditorModel,
+	resolveLoopAuditorFallbacks,
+} from '../utils/loop-helpers'
 import { execSync, spawnSync } from 'child_process'
 import { resolve } from 'path'
 import type { createSandboxManager } from '../sandbox/manager'
@@ -30,6 +37,8 @@ export function createLoopEventHandler(
 	sandboxManager?: ReturnType<typeof createSandboxManager>,
 	projectId?: string,
 	dataDir?: string,
+	recoveryManager?: SessionRecoveryManager,
+	telemetry?: TelemetryCollector,
 ): LoopEventHandler {
 	const minAudits = loopService.getMinAudits()
 	const retryTimeouts = new Map<string, NodeJS.Timeout>()
@@ -353,6 +362,19 @@ export function createLoopEventHandler(
 				logger.error(`Loop: failed to stop sandbox container`, err)
 			}
 		}
+
+		if (telemetry) {
+			telemetry.record({
+				type: 'loop_outcome',
+				sessionId,
+				data: {
+					loopName: state.loopName,
+					reason,
+					iterations: state.iteration,
+					worktree: !!state.worktree,
+				},
+			})
+		}
 	}
 
 	async function handlePromptError(
@@ -503,8 +525,8 @@ export function createLoopEventHandler(
 		}
 
 		logger.error(`Loop: assistant error detected in ${phase} phase: ${assistantError}`)
-		const isModelError = /provider|auth|model|api\s*error/i.test(assistantError)
-		if (isModelError) {
+		const classified = classifyModelError(assistantError)
+		if (classified.kind === 'provider' || classified.kind === 'overloaded' || classified.kind === 'timeout') {
 			const nextErrorCount = (currentState.errorCount ?? 0) + 1
 			if (nextErrorCount >= MAX_RETRIES) {
 				await terminateLoop(loopName, currentState, `error_max_retries: assistant error: ${assistantError}`)
@@ -516,7 +538,24 @@ export function createLoopEventHandler(
 				errorCount: nextErrorCount,
 			})
 			logger.log(
-				`Loop: marking model as failed, will fall back to default model (error ${nextErrorCount}/${MAX_RETRIES})`,
+				`Loop: marking model as failed, will fall back to configured chain/default (error ${nextErrorCount}/${MAX_RETRIES})`,
+			)
+			return { assistantErrorDetected: true, currentState: loopService.getActiveState(loopName)! }
+		}
+
+		if (classified.kind === 'context_window') {
+			const nextErrorCount = (currentState.errorCount ?? 0) + 1
+			if (nextErrorCount >= MAX_RETRIES) {
+				await terminateLoop(loopName, currentState, `error_max_retries: assistant error: ${assistantError}`)
+				return null
+			}
+			loopService.setState(loopName, {
+				...currentState,
+				errorCount: nextErrorCount,
+				modelFailed: false,
+			})
+			logger.log(
+				`Loop: context window exceeded, keeping the same model and recovering via session rotation (error ${nextErrorCount}/${MAX_RETRIES})`,
 			)
 			return { assistantErrorDetected: true, currentState: loopService.getActiveState(loopName)! }
 		}
@@ -601,11 +640,12 @@ export function createLoopEventHandler(
 
 		const currentConfig = getConfig()
 		const loopModel = resolveLoopModel(currentConfig, loopService, loopName)
+		const loopFallbackModels = resolveLoopModelFallbacks(currentConfig)
 		if (!loopModel) {
-			logger.log(`Loop: configured model previously failed, using default model`)
+			logger.log(`Loop: primary model unavailable, using configured fallback chain or default model`)
 		}
 
-		const sendWithModel = async () => {
+		const sendWithModel = async (candidate: { providerID: string; modelID: string }) => {
 			const freshState = loopService.getActiveState(loopName)
 			if (!freshState?.active) {
 				throw new Error('loop_cancelled')
@@ -614,7 +654,7 @@ export function createLoopEventHandler(
 				sessionID: activeSessionId,
 				directory: freshState.worktreeDir,
 				parts: [{ type: 'text' as const, text: continuationPrompt }],
-				model: loopModel,
+				model: candidate,
 			})
 			return { data: result.data, error: result.error }
 		}
@@ -637,6 +677,46 @@ export function createLoopEventHandler(
 			sendWithoutModel,
 			loopModel,
 			logger,
+			{
+				fallbackModels: loopFallbackModels,
+				recoveryManager,
+				recoverySessionId: activeSessionId,
+				recoveryCallbacks: telemetry
+					? {
+							onRecoveryEvent: event => {
+								telemetry.record({
+									type: 'recovery',
+									sessionId: event.sessionId,
+									data: {
+										action: event.action,
+										model: event.model,
+										detail: event.detail,
+										success: event.success,
+									},
+								})
+							},
+						}
+					: undefined,
+				onContextWindowError: async () => {
+					const freshState = loopService.getActiveState(loopName)
+					if (!freshState?.active) return false
+					try {
+						const recoveredSessionId = await rotateSession(loopName, {
+							...freshState,
+							sessionId: activeSessionId,
+						})
+						activeSessionId = recoveredSessionId
+						loopService.setState(loopName, {
+							...freshState,
+							sessionId: recoveredSessionId,
+						})
+						return true
+					} catch (err) {
+						logger.error(`Loop: context-window recovery rotation failed`, err)
+						return false
+					}
+				},
+			},
 		)
 
 		if (promptResult.error) {
@@ -724,8 +804,8 @@ export function createLoopEventHandler(
 
 			const currentConfig = getConfig()
 			const auditorModel = resolveLoopAuditorModel(currentConfig, loopService, loopName, logger)
-
-			const auditPrompt = {
+			const auditorFallbackModels = resolveLoopAuditorFallbacks(currentConfig)
+			const buildAuditPrompt = (candidate?: { providerID: string; modelID: string }) => ({
 				sessionID: currentState.sessionId,
 				directory: currentState.worktreeDir,
 				parts: [
@@ -734,16 +814,24 @@ export function createLoopEventHandler(
 						agent: 'sage',
 						description: `Post-iteration ${currentState.iteration} code review`,
 						prompt: loopService.buildAuditPrompt(currentState),
-						...(auditorModel ? { model: auditorModel } : {}),
+						...(candidate ? { model: candidate } : {}),
 					},
 				],
-			}
+			})
 
-			const promptResult = await v2Client.session.promptAsync(auditPrompt)
+			const { result: promptResult } = await retryWithModelFallback(
+				candidate => v2Client.session.promptAsync(buildAuditPrompt(candidate)),
+				() => v2Client.session.promptAsync(buildAuditPrompt()),
+				auditorModel,
+				logger,
+				{
+					fallbackModels: auditorFallbackModels,
+				},
+			)
 
 			if (promptResult.error) {
 				const retryFn = async () => {
-					const result = await v2Client.session.promptAsync(auditPrompt)
+					const result = await v2Client.session.promptAsync(buildAuditPrompt(auditorModel))
 					if (result.error) {
 						throw result.error
 					}
@@ -897,10 +985,30 @@ export function createLoopEventHandler(
 			if (state?.active) {
 				const errorMessage = errorProps?.error?.data?.message ?? errorName ?? 'unknown error'
 				logger.error(`Loop: session error for ${eventSessionId}: ${errorMessage}`)
-				const isModelError = /provider|auth|model|api\s*error/i.test(errorMessage)
-				if (isModelError && !state.modelFailed) {
-					logger.log(`Loop: marking model as failed, will fall back to default on next iteration`)
-					loopService.setState(loopName, { ...state, modelFailed: true })
+				const classified = classifyModelError(errorMessage)
+				if (classified.kind === 'context_window') {
+					loopService.setState(loopName, {
+						...state,
+						errorCount: (state.errorCount ?? 0) + 1,
+						modelFailed: false,
+					})
+					logger.log(
+						`Loop: session error indicates context overflow; next iteration will rotate session and retry same model`,
+					)
+				} else if (
+					(classified.kind === 'provider' ||
+						classified.kind === 'overloaded' ||
+						classified.kind === 'timeout') &&
+					!state.modelFailed
+				) {
+					logger.log(
+						`Loop: marking model as failed, will fall back to configured chain/default on next iteration`,
+					)
+					loopService.setState(loopName, {
+						...state,
+						modelFailed: true,
+						errorCount: (state.errorCount ?? 0) + 1,
+					})
 				}
 			}
 			return

@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { createKvQuery } from '../src/storage/kv-queries'
 import { createKvService } from '../src/services/kv'
 import { createReviewTools } from '../src/tools/review'
 import { createLoopService } from '../src/services/loop'

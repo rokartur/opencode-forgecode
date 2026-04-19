@@ -11,8 +11,8 @@
  */
 
 const DEFAULTS = {
-	shell: { prefixLines: 200, suffixLines: 200, maxLineLength: 2000 },
-	search: { maxLines: 500 },
+	shell: { prefixLines: 200, suffixLines: 200, maxLineLength: 500 },
+	search: { maxLines: 200, maxLineLength: 400 },
 	fetch: { maxChars: 40_000 },
 }
 
@@ -39,11 +39,39 @@ export function truncateShell(content: string, opts: Partial<typeof DEFAULTS.she
 }
 
 export function truncateSearch(content: string, opts: Partial<typeof DEFAULTS.search> = {}): string {
-	const { maxLines } = { ...DEFAULTS.search, ...opts }
-	const lines = content.split('\n')
-	if (lines.length <= maxLines) return content
-	const hidden = lines.length - maxLines
-	return [...lines.slice(0, maxLines), `...[${hidden} more matches truncated]`].join('\n')
+	const { maxLines, maxLineLength } = { ...DEFAULTS.search, ...opts }
+	const raw = content.split('\n')
+
+	// Per-line clipping — minified JS/CSS matches can blow up the context window
+	let clippedLineCount = 0
+	const clipped = raw.map(line => {
+		if (line.length > maxLineLength) {
+			clippedLineCount++
+			return `${line.slice(0, maxLineLength)}...[${line.length - maxLineLength} more chars truncated]`
+		}
+		return line
+	})
+
+	if (clipped.length <= maxLines) {
+		return clipped.join('\n')
+	}
+
+	// Count match distribution per file (prefix before first ':') so agent sees
+	// the density before the cutoff rather than an arbitrary truncation.
+	const fileCounts = new Map<string, number>()
+	for (const line of clipped) {
+		const idx = line.indexOf(':')
+		if (idx > 0) {
+			const file = line.slice(0, idx)
+			fileCounts.set(file, (fileCounts.get(file) ?? 0) + 1)
+		}
+	}
+	const hidden = clipped.length - maxLines
+	const banner =
+		fileCounts.size > 0
+			? `...[${hidden} more matches truncated across ${fileCounts.size} files${clippedLineCount > 0 ? `; ${clippedLineCount} long lines clipped` : ''}]`
+			: `...[${hidden} more matches truncated${clippedLineCount > 0 ? `; ${clippedLineCount} long lines clipped` : ''}]`
+	return [...clipped.slice(0, maxLines), banner].join('\n')
 }
 
 export function truncateFetch(content: string, opts: Partial<typeof DEFAULTS.fetch> = {}): string {

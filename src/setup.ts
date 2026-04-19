@@ -123,6 +123,17 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
 		agents: config.agents,
 		sandbox: config.sandbox,
 		graph: config.graph,
+		harness: config.harness,
+		background: config.background,
+		lsp: config.lsp,
+		ast: config.ast,
+		skills: config.skills,
+		intentGate: config.intentGate,
+		commentChecker: config.commentChecker,
+		contextInjection: config.contextInjection,
+		restrictedShell: config.restrictedShell,
+		telemetry: config.telemetry,
+		rtk: config.rtk,
 	}
 
 	if (normalized.sandbox) {

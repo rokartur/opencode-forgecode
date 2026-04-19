@@ -91,6 +91,8 @@ function createMockApi(overrides?: Partial<TuiPluginApi>): TuiPluginApi {
 describe('Fresh Loop Launch', () => {
 	let db: Database
 	let dbPath: string
+	let testConfigDir: string
+	let testDataDir: string
 	const projectId = 'test-project'
 	const planText = '# Test Plan\n\nThis is a test plan for loop execution.'
 	const title = 'Test Loop'
@@ -99,10 +101,16 @@ describe('Fresh Loop Launch', () => {
 		const result = createTestDb()
 		db = result.db
 		dbPath = result.path
+		testConfigDir = `${TEST_DIR}-config-${Math.random().toString(36).slice(2)}`
+		testDataDir = `${TEST_DIR}-data-${Math.random().toString(36).slice(2)}`
+		process.env['XDG_CONFIG_HOME'] = testConfigDir
+		process.env['XDG_DATA_HOME'] = testDataDir
 	})
 
 	afterEach(() => {
 		db.close()
+		delete process.env['XDG_CONFIG_HOME']
+		delete process.env['XDG_DATA_HOME']
 	})
 
 	test('Creates fresh in-place loop session', async () => {
@@ -545,9 +553,9 @@ describe('Fresh Loop Launch', () => {
 		const mockApi = createMockApi()
 
 		// Track call order
-		let waitForGraphReadyCalled = false
-		let promptAsyncCalled = false
-		let waitForGraphReadyCalledBeforePrompt = false
+		let _waitForGraphReadyCalled = false
+		let _promptAsyncCalled = false
+		let _waitForGraphReadyCalledBeforePrompt = false
 
 		// Create a spy for waitForGraphReady by mocking the module
 		const tuiGraphStatusModule = await import('../src/utils/tui-graph-status')
@@ -694,7 +702,9 @@ describe('Fresh Loop Launch', () => {
 		expect(mockApi.client.session.promptAsync).toHaveBeenCalled()
 		const call = (mockApi.client.session.promptAsync as any).mock.calls[0][0]
 		// parseModelString converts 'anthropic/claude-sonnet-4-20250514' to { providerID: 'anthropic', modelID: 'claude-sonnet-4-20250514' }
-		expect(call.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4-20250514' })
+		expect(call.model).toEqual(
+			expect.objectContaining({ providerID: 'anthropic', modelID: 'claude-sonnet-4-20250514' }),
+		)
 	})
 
 	test('Persists both executionModel and auditorModel and uses executionModel for first prompt', async () => {
@@ -737,7 +747,7 @@ describe('Fresh Loop Launch', () => {
 		const executionModel = 'anthropic/unavailable-model'
 		let callCount = 0
 
-		const promptAsyncSpy = mock(async (params: any) => {
+		const promptAsyncSpy = mock(async (_params: any) => {
 			callCount++
 			if (callCount <= 2) {
 				// First two calls with model fail (maxRetries=2)
@@ -764,13 +774,60 @@ describe('Fresh Loop Launch', () => {
 
 		// First two calls should have included the model
 		const firstCall = (mockApi.client.session.promptAsync as any).mock.calls[0][0]
-		expect(firstCall.model).toEqual({ providerID: 'anthropic', modelID: 'unavailable-model' })
+		expect(firstCall.model).toEqual(
+			expect.objectContaining({ providerID: 'anthropic', modelID: 'unavailable-model' }),
+		)
 
 		const secondCall = (mockApi.client.session.promptAsync as any).mock.calls[1][0]
-		expect(secondCall.model).toEqual({ providerID: 'anthropic', modelID: 'unavailable-model' })
+		expect(secondCall.model).toEqual(
+			expect.objectContaining({ providerID: 'anthropic', modelID: 'unavailable-model' }),
+		)
 
 		// Third call should not have included the model (fallback)
 		const thirdCall = (mockApi.client.session.promptAsync as any).mock.calls[2][0]
 		expect(thirdCall.model).toBeUndefined()
+	})
+
+	test('launchFreshLoop uses configured forge fallback chain before default model', async () => {
+		const { mkdirSync, writeFileSync } = await import('fs')
+		const configPath = `${testConfigDir}/opencode/forge-config.jsonc`
+		mkdirSync(`${testConfigDir}/opencode`, { recursive: true })
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				agents: {
+					forge: {
+						fallback_models: ['openai/gpt-5.4-mini'],
+					},
+				},
+			}),
+		)
+
+		const mockApi = createMockApi()
+		const executionModel = 'anthropic/unavailable-model'
+		const attemptedModels: Array<string | undefined> = []
+
+		;(mockApi.client.session.promptAsync as ReturnType<typeof mock>).mockImplementation(async (params: any) => {
+			attemptedModels.push(params.model ? `${params.model.providerID}/${params.model.modelID}` : undefined)
+			if (params.model?.modelID === 'unavailable-model') {
+				return { data: undefined, error: { name: 'ProviderError', message: 'primary unavailable' } }
+			}
+			return { data: {} }
+		})
+
+		await launchFreshLoop({
+			planText,
+			title,
+			directory: TEST_DIR,
+			projectId,
+			isWorktree: false,
+			api: mockApi,
+			dbPath,
+			executionModel,
+		})
+
+		expect(attemptedModels).toContain('anthropic/unavailable-model')
+		expect(attemptedModels).toContain('openai/gpt-5.4-mini')
+		expect(attemptedModels).not.toContain(undefined)
 	})
 })

@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { createKvQuery } from '../src/storage/kv-queries'
 import { createKvService } from '../src/services/kv'
 import {
 	createLoopService,
@@ -9,7 +8,7 @@ import {
 	fetchSessionOutput,
 	type LoopState,
 	generateUniqueName,
-	type LoopService,
+	type _LoopService,
 } from '../src/services/loop'
 import { createLoopTools } from '../src/tools/loop'
 import { createPlanTools } from '../src/tools/plan-kv'
@@ -930,15 +929,6 @@ describe('Stall Detection', () => {
 	})
 })
 
-describe('Minimum Audits', () => {
-	test('getMinAudits returns configured value', () => {
-		const db = createTestDb()
-		const kvService = createKvService(db)
-		const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { minAudits: 3 })
-		expect(loopService.getMinAudits()).toBe(3)
-	})
-})
-
 describe('reconcileStale', () => {
 	let db: Database
 	let kvService: ReturnType<typeof createKvService>
@@ -1697,6 +1687,84 @@ describe('Assistant Error Detection', () => {
 
 		const updatedState = loopService.getActiveState('test-worktree')
 		expect(updatedState?.modelFailed).toBe(true)
+	})
+
+	test('context window assistant error keeps same model and increments error count', async () => {
+		const { createLoopEventHandler } = require('../src/hooks/loop')
+		const sessionId = 'context-window-session'
+
+		const mockClient = {
+			session: {
+				promptAsync: async () => ({ data: undefined, error: undefined }),
+				create: async () => ({ data: { id: sessionId }, error: undefined }),
+				messages: async () => ({ data: [] }),
+				status: async () => ({ data: {} }),
+				abort: async () => ({ data: undefined, error: undefined }),
+			},
+			worktree: {
+				create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+				remove: async () => ({ data: undefined, error: undefined }),
+			},
+		} as any
+
+		const mockV2Client = {
+			session: {
+				create: async () => ({ data: { id: sessionId }, error: undefined }),
+				delete: async () => ({ data: undefined, error: undefined }),
+				promptAsync: async () => ({ data: undefined, error: undefined }),
+				messages: async () => ({
+					data: [
+						{
+							info: {
+								role: 'assistant',
+								error: { name: 'ContextWindowError', data: { message: 'context window exceeded' } },
+							},
+							parts: [{ type: 'text', text: '' }],
+						},
+					],
+				}),
+				status: async () => ({ data: {} }),
+				abort: async () => ({ data: undefined, error: undefined }),
+			},
+		} as any
+
+		const mockGetConfig = () => ({ loop: {}, executionModel: 'openai/gpt-5.4', auditorModel: undefined })
+		const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+		const state = {
+			active: true,
+			sessionId,
+			loopName: 'context-window-loop',
+			worktreeDir: '/tmp/test-worktree',
+			worktreeBranch: 'main',
+			iteration: 1,
+			maxIterations: 5,
+			completionSignal: 'ALL_PHASES_COMPLETE',
+			startedAt: new Date().toISOString(),
+			prompt: 'Test prompt',
+			phase: 'coding' as const,
+			audit: false,
+			errorCount: 0,
+			auditCount: 0,
+			modelFailed: false,
+		}
+
+		loopService.setState('context-window-loop', state)
+		loopService.registerLoopSession(sessionId, 'context-window-loop')
+
+		await handler.onEvent({
+			event: {
+				type: 'session.status',
+				properties: {
+					sessionID: sessionId,
+					status: { type: 'idle' },
+				},
+			},
+		})
+
+		const updatedState = loopService.getActiveState('context-window-loop')
+		expect(updatedState?.errorCount).toBe(1)
+		expect(updatedState?.modelFailed).toBe(false)
 	})
 
 	test('session.error event with abort error terminates loop immediately', async () => {
@@ -3554,7 +3622,7 @@ describe('Per-Loop Model Overrides', () => {
 	describe('audit subtask model resolution', () => {
 		test('resolveLoopAuditorModel prefers state.auditorModel for audit subtasks', () => {
 			const mockLoopService = {
-				getActiveState: (name: string) => ({
+				getActiveState: (_name: string) => ({
 					active: true,
 					auditorModel: 'provider/state-auditor',
 					executionModel: 'provider/state-exec',
@@ -3575,7 +3643,7 @@ describe('Per-Loop Model Overrides', () => {
 
 		test('resolveLoopAuditorModel falls back to config.auditorModel when state missing', () => {
 			const mockLoopService = {
-				getActiveState: (name: string) => ({
+				getActiveState: (_name: string) => ({
 					active: true,
 					executionModel: 'provider/state-exec',
 				}),
@@ -3595,7 +3663,7 @@ describe('Per-Loop Model Overrides', () => {
 
 		test('resolveLoopAuditorModel falls back to execution model when no auditor config', () => {
 			const mockLoopService = {
-				getActiveState: (name: string) => ({
+				getActiveState: (_name: string) => ({
 					active: true,
 					auditorModel: 'provider/state-auditor',
 					executionModel: 'provider/state-exec',
@@ -3797,7 +3865,7 @@ describe('Per-Loop Model Overrides', () => {
 				},
 			})
 
-			expect(capturedModel).toEqual({ providerID: 'provider', modelID: 'state-auditor' })
+			expect(capturedModel).toEqual(expect.objectContaining({ providerID: 'provider', modelID: 'state-auditor' }))
 		})
 
 		test('audit subtask falls back to config.auditorModel when state has no override', async () => {
@@ -3880,11 +3948,13 @@ describe('Per-Loop Model Overrides', () => {
 				},
 			})
 
-			expect(capturedModel).toEqual({ providerID: 'provider', modelID: 'config-auditor' })
+			expect(capturedModel).toEqual(
+				expect.objectContaining({ providerID: 'provider', modelID: 'config-auditor' }),
+			)
 		})
 	})
 
-	describe('loop-status tool output', () => {
+	describe('loop-status state storage', () => {
 		test('status output prefers state.executionModel over config defaults', async () => {
 			const db = createTestDb()
 			const kvService = createKvService(db)
@@ -4021,7 +4091,7 @@ describe('Per-Loop Model Overrides', () => {
 	})
 
 	describe('loop-restart preserves models', () => {
-		test('restart preserves executionModel and auditorModel on state', async () => {
+		test('stopped state preserves executionModel and auditorModel', async () => {
 			const db = createTestDb()
 			const kvService = createKvService(db)
 			const loopService = createLoopService(kvService, projectId, createMockLogger())

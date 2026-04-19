@@ -4,7 +4,7 @@ import { existsSync } from 'fs'
 import { join, resolve } from 'path'
 import type { ToolContext } from './types'
 
-import { parseModelString, retryWithModelFallback } from '../utils/model-fallback'
+import { parseModelString, resolveFallbackModelEntries, retryWithModelFallback } from '../utils/model-fallback'
 import { slugify } from '../utils/logger'
 import { findPartialMatch } from '../utils/partial-match'
 import { formatSessionOutput, formatAuditResult } from '../utils/loop-format'
@@ -82,7 +82,7 @@ export async function setupLoop(ctx: ToolContext, options: LoopSetupOptions): Pr
 				cwd: projectDir,
 				encoding: 'utf-8',
 			}).trim()
-		} catch (_err) {
+		} catch {
 			logger.log(`loop: no git branch detected, running without branch info`)
 		}
 
@@ -251,13 +251,13 @@ export async function setupLoop(ctx: ToolContext, options: LoopSetupOptions): Pr
 	}
 
 	const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
-		() =>
+		candidate =>
 			v2.session.promptAsync({
 				sessionID: loopContext.sessionId,
 				directory: loopContext.directory,
 				parts: [{ type: 'text' as const, text: promptText }],
 				...(options.agent && { agent: options.agent }),
-				model: options.model!,
+				model: candidate,
 			}),
 		() =>
 			v2.session.promptAsync({
@@ -268,6 +268,7 @@ export async function setupLoop(ctx: ToolContext, options: LoopSetupOptions): Pr
 			}),
 		options.model,
 		logger,
+		{ fallbackModels: resolveFallbackModelEntries(config.agents?.forge?.fallback_models) },
 	)
 
 	if (promptResult.error) {
@@ -615,13 +616,13 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 						parseModelString(config.executionModel)
 
 					const { result: promptResult } = await retryWithModelFallback(
-						() =>
+						candidate =>
 							v2.session.promptAsync({
 								sessionID: newSessionId,
 								directory: stoppedState.worktreeDir!,
 								parts: [{ type: 'text' as const, text: promptText }],
 								agent: 'forge',
-								model: loopModel!,
+								model: candidate,
 							}),
 						() =>
 							v2.session.promptAsync({
@@ -632,6 +633,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 							}),
 						loopModel,
 						logger,
+						{ fallbackModels: resolveFallbackModelEntries(config.agents?.forge?.fallback_models) },
 					)
 
 					if (promptResult.error) {

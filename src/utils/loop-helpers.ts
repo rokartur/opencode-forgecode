@@ -1,6 +1,6 @@
 import type { PluginConfig, Logger } from '../types'
 import type { LoopService } from '../services/loop'
-import { parseModelString } from './model-fallback'
+import { parseModelString, resolveFallbackModelEntries, type ResolvedModelEntry } from './model-fallback'
 
 export function resolveLoopModel(
 	config: PluginConfig,
@@ -12,6 +12,10 @@ export function resolveLoopModel(
 	const hasExplicit = state?.executionModel !== undefined && state?.executionModel !== null
 	if (hasExplicit) return parseModelString(state!.executionModel)
 	return parseModelString(config.loop?.model) ?? parseModelString(config.executionModel)
+}
+
+export function resolveLoopModelFallbacks(config: PluginConfig): ResolvedModelEntry[] {
+	return resolveFallbackModelEntries(config.agents?.forge?.fallback_models)
 }
 
 export function resolveLoopAuditorModel(
@@ -52,6 +56,10 @@ export function resolveLoopAuditorModel(
 		)
 	}
 	return resolved
+}
+
+export function resolveLoopAuditorFallbacks(config: PluginConfig): ResolvedModelEntry[] {
+	return resolveFallbackModelEntries(config.agents?.sage?.fallback_models)
 }
 
 export function formatDuration(seconds: number): string {

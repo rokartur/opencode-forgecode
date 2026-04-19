@@ -25,7 +25,7 @@ import {
 	type ForgePendingTodo,
 } from '../harness'
 
-const MUTATING_TOOLS = new Set(['write', 'edit', 'multi_patch'])
+const MUTATING_TOOLS = new Set(['write', 'edit', 'multi_patch', 'patch'])
 
 const DEFAULT_CONFIG: Required<Omit<HarnessConfig, 'truncation'>> & {
 	truncation: Required<NonNullable<HarnessConfig['truncation']>>
@@ -35,6 +35,8 @@ const DEFAULT_CONFIG: Required<Omit<HarnessConfig, 'truncation'>> & {
 	pendingTodosReminder: true,
 	snapshots: true,
 	compaction: true,
+	hashAnchoredPatch: true,
+	plugins: [],
 	truncation: {
 		enabled: true,
 	},
@@ -213,6 +215,8 @@ function mergeConfig(user?: HarnessConfig): typeof DEFAULT_CONFIG {
 		pendingTodosReminder: user?.pendingTodosReminder ?? DEFAULT_CONFIG.pendingTodosReminder,
 		snapshots: user?.snapshots ?? DEFAULT_CONFIG.snapshots,
 		compaction: user?.compaction ?? DEFAULT_CONFIG.compaction,
+		hashAnchoredPatch: user?.hashAnchoredPatch ?? DEFAULT_CONFIG.hashAnchoredPatch,
+		plugins: user?.plugins ?? DEFAULT_CONFIG.plugins,
 		truncation: {
 			enabled: user?.truncation?.enabled ?? DEFAULT_CONFIG.truncation.enabled,
 		},

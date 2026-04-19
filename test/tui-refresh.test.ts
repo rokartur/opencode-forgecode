@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { existsSync, rmSync } from 'fs'
-import { join } from 'path'
+import { rmSync } from 'fs'
 import { readLoopStates, readLoopByName, shouldPollSidebar, type LoopInfo } from '../src/utils/tui-refresh-helpers'
 import type { GraphStatusPayload } from '../src/utils/graph-status-store'
 
@@ -26,7 +25,7 @@ function createTestDb(): { db: Database; dbPath: string } {
 }
 
 // Helper to get DB path from test database
-function getDbPath(db: Database): string {
+function _getDbPath(db: Database): string {
 	return (db as any).path
 }
 
@@ -357,7 +356,7 @@ describe('TUI Refresh Behavior', () => {
 	})
 
 	describe('New-repo lifecycle regression', () => {
-		const createLoop = (overrides: Partial<LoopInfo>): LoopInfo => ({
+		const _createLoop = (overrides: Partial<LoopInfo>): LoopInfo => ({
 			name: 'test-loop',
 			sessionId: 'test-session',
 			phase: 'coding',

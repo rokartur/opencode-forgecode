@@ -20,11 +20,29 @@ import {
 	createPlanApprovalEventHook,
 } from './tools'
 import { createSandboxToolBeforeHook, createSandboxToolAfterHook } from './hooks/sandbox-tools'
+import { createHostToolBeforeHook, createHostToolAfterHook } from './hooks/host-tools'
 import { createGraphCommandEventHook } from './hooks/graph-command'
 import { createGraphToolBeforeHook, createGraphToolAfterHook } from './hooks/graph-tools'
 import type { ToolContext } from './tools'
 import type { GraphService } from './graph'
 import { createGraphStatusCallback, writeGraphStatus, UNAVAILABLE_STATUS } from './utils/graph-status-store'
+import { logUnsupportedConfigIssues, getCapabilityDescriptors } from './runtime/feature-support'
+import { SessionRecoveryManager } from './runtime/session-recovery'
+import { AgentBudgetEnforcer } from './runtime/agent-budget'
+import { TelemetryCollector } from './runtime/telemetry'
+import { createBudgetHooks } from './hooks/budget'
+import { createRestrictedShellHooks } from './hooks/restricted-shell'
+import { createContextInjectionHooks } from './hooks/context-injection'
+import { createSkillLoaderHooks } from './hooks/skill-loader'
+import { createIntentRouterHooks } from './hooks/intent-router'
+import { createUserPromptTemplateHooks } from './hooks/user-prompt-template'
+import { LspPool } from './runtime/lsp/pool'
+import { BackgroundManager } from './runtime/background/manager'
+import { ConcurrencyManager } from './runtime/background/concurrency'
+import { BackgroundSpawner } from './runtime/background/spawner'
+import { ensureRtkInstalled } from './runtime/rtk'
+import { createRtkGuidanceHooks } from './hooks/rtk-guidance'
+import { createCommentCheckerHooks } from './hooks/comment-checker'
 
 /**
  * Creates an OpenCode plugin instance with loop management, graph indexing, and sandboxing.
@@ -60,6 +78,15 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			debug: loggingConfig?.debug ?? false,
 		})
 		logger.log(`Initializing plugin for directory: ${directory}, projectId: ${projectId}`)
+		logUnsupportedConfigIssues(logger, config)
+		const caps = getCapabilityDescriptors()
+		const active = caps.filter(c => c.status === 'implemented').length
+		logger.log(`Capabilities: ${active}/${caps.length} active`)
+
+		// Fire-and-forget RTK installer. Never blocks plugin init.
+		void ensureRtkInstalled(logger, config.rtk).catch(err => {
+			logger.error(`[rtk] unexpected installer error: ${err instanceof Error ? err.message : String(err)}`)
+		})
 
 		const dataDir = config.dataDir || resolveDataDir()
 
@@ -141,6 +168,30 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 				.catch(err => logger.error('Failed to cleanup orphaned containers', err))
 		}
 
+		const recoveryManager = new SessionRecoveryManager(logger)
+		logger.log(`Session recovery manager initialized (maxTimeoutRetries=${3}, maxOverloadRetries=${3})`)
+
+		// Budget enforcer — per-agent turn/failure/request/token limits
+		const budgetEnforcer = new AgentBudgetEnforcer(logger, config.agents ? 'warn_then_stop' : 'warn')
+
+		// Telemetry collector — local-only, opt-in, SQLite-backed
+		const telemetry = new TelemetryCollector(logger, config.telemetry)
+		if (telemetry.isEnabled() && db) {
+			telemetry.init(db as Parameters<TelemetryCollector['init']>[0])
+			logger.log('[telemetry] collector initialized')
+		}
+
+		const budgetHooks = createBudgetHooks(budgetEnforcer, logger, config, telemetry, projectId, kvService)
+
+		// Stage 4 hooks — safety & routing
+		const shellHooks = createRestrictedShellHooks(logger, config)
+		const contextHooks = createContextInjectionHooks(logger, directory, config)
+		const skillHooks = createSkillLoaderHooks(logger, directory, config)
+		const intentHooks = createIntentRouterHooks(logger, config)
+		const userPromptHooks = createUserPromptTemplateHooks(logger, config)
+		const rtkHooks = createRtkGuidanceHooks(logger, config)
+		const commentCheckerHooks = createCommentCheckerHooks(logger, config)
+
 		const loopHandler = createLoopEventHandler(
 			loopService,
 			client,
@@ -150,6 +201,8 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			sandboxManager || undefined,
 			projectId,
 			dataDir,
+			recoveryManager,
+			telemetry,
 		)
 
 		// Initialize graph service if enabled
@@ -185,6 +238,71 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 		} else {
 			// Graph is disabled - persist unavailable status
 			writeGraphStatus(kvService, projectId, UNAVAILABLE_STATUS)
+		}
+
+		// Initialize LSP pool if enabled
+		let lspPool: LspPool | null = null
+		if (config.lsp?.enabled) {
+			try {
+				const rootUri = `file://${directory}`
+				lspPool = new LspPool(
+					rootUri,
+					{ log: (msg: unknown, ...rest: unknown[]) => logger.log(String(msg), ...rest) },
+					config.lsp.servers,
+				)
+				logger.log('[lsp] Pool initialized')
+			} catch (err) {
+				logger.error('Failed to initialize LSP pool', err)
+				lspPool = null
+			}
+		}
+
+		// Initialize background task runtime if enabled
+		let bgManager: BackgroundManager | null = null
+		let bgConcurrency: ConcurrencyManager | null = null
+		let bgSpawner: BackgroundSpawner | null = null
+		if (config.background?.enabled && db) {
+			try {
+				bgManager = new BackgroundManager(db)
+				bgConcurrency = new ConcurrencyManager(bgManager, {
+					maxConcurrent: config.background.maxConcurrent,
+					perModelLimit: config.background.perModelLimit,
+				})
+				bgSpawner = new BackgroundSpawner(
+					v2,
+					bgManager,
+					bgConcurrency,
+					directory,
+					{ log: (msg: unknown, ...rest: unknown[]) => logger.log(String(msg), ...rest) },
+					{
+						pollIntervalMs: config.background.pollIntervalMs,
+						idleTimeoutMs: config.background.idleTimeoutMs,
+						onTaskEvent: ({ type, task }) => {
+							// Emit a TUI toast so the user sees when a background task
+							// finishes without having to poll the sidebar.
+							const variant = type === 'completed' ? 'success' : type === 'error' ? 'error' : 'info'
+							const verb = type === 'completed' ? 'completed' : type === 'error' ? 'failed' : 'cancelled'
+							const title = `Background ${verb}`
+							const message = `${task.targetAgent}: ${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '…' : ''}`
+							v2.tui
+								.showToast({
+									directory,
+									title,
+									message,
+									variant,
+									duration: 5000,
+								})
+								.catch(err => logger.debug('[background] toast failed', err))
+						},
+					},
+				)
+				logger.log('[background] Runtime initialized')
+			} catch (err) {
+				logger.error('Failed to initialize background runtime', err)
+				bgManager = null
+				bgConcurrency = null
+				bgSpawner = null
+			}
 		}
 
 		if (degraded) {
@@ -259,6 +377,18 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 					logger.log('Graph service closed')
 				}
 
+				if (lspPool) {
+					await lspPool.closeAll()
+					logger.log('LSP pool closed')
+				}
+
+				if (bgSpawner) {
+					bgSpawner.shutdown()
+					logger.log('Background spawner shut down')
+				}
+
+				telemetry.close()
+
 				if (db) {
 					closeDatabase(db)
 				}
@@ -292,6 +422,13 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			input,
 			sandboxManager,
 			graphService: graphService || null,
+			recoveryManager,
+			budgetEnforcer,
+			telemetry,
+			lspPool,
+			bgSpawner,
+			bgManager,
+			bgConcurrency,
 			degraded,
 		}
 
@@ -308,6 +445,20 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			loopService,
 			sandboxManager,
 			logger,
+		})
+		const hostBeforeHook = createHostToolBeforeHook({
+			loopService,
+			sandboxManager,
+			logger,
+			cwd: directory,
+			enabled: config?.host?.fastGrep !== false,
+		})
+		const hostAfterHook = createHostToolAfterHook({
+			loopService,
+			sandboxManager,
+			logger,
+			cwd: directory,
+			enabled: config?.host?.fastGrep !== false,
 		})
 		const graphBeforeHook = createGraphToolBeforeHook({
 			graphService: graphService || null,
@@ -327,6 +478,20 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			config: createConfigHandler(agents, config.agents),
 			'chat.message': async (input, output) => {
 				await sessionHooks.onMessage(input, output)
+				budgetHooks.onMessage(input as { sessionID: string; agent?: string })
+				shellHooks.trackAgent(input as { sessionID: string; agent?: string })
+				contextHooks.onMessage(
+					input as { sessionID: string; messageID?: string },
+					output as { parts: Array<Record<string, unknown>> },
+				)
+				skillHooks.onMessage(
+					input as { sessionID: string; messageID?: string; agent?: string },
+					output as { parts: Array<Record<string, unknown>> },
+				)
+				rtkHooks.onMessage(
+					input as { sessionID: string; messageID?: string; agent?: string },
+					output as { parts: Array<Record<string, unknown>> },
+				)
 			},
 			event: async input => {
 				const eventInput = input as {
@@ -349,7 +514,9 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 						`[tool-before] ${input.tool} callID=${input.callID} session=${input.sessionID} loop=${loopName}`,
 					)
 				}
-				// Order: graph → harness → existing → sandbox
+				// Restricted shell check runs first — may neuter the command
+				shellHooks.toolBefore(input, output as { args: unknown })
+				// Order: graph → harness → existing → host → sandbox
 				// Graph hook must run BEFORE sandbox hook to inspect original command
 				// Graph hook must also run BEFORE toolExecuteBeforeHook to capture original args
 				await graphBeforeHook!(input, output)
@@ -359,6 +526,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 					args: output.args,
 				})
 				await toolExecuteBeforeHook!(input, output)
+				await hostBeforeHook!(input, output)
 				await sandboxBeforeHook!(input, output)
 			},
 			'tool.execute.after': async (input, output) => {
@@ -368,14 +536,21 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 						`[tool-after] ${input.tool} callID=${input.callID} output=${output.output?.slice(0, 200)}`,
 					)
 				}
-				// Order reverse of before: sandbox → existing → harness → graph
+				// Order reverse of before: sandbox → host → existing → harness → graph
 				await sandboxAfterHook!(input, output)
+				await hostAfterHook!(input, output)
 				await toolExecuteAfterHook!(input, output)
 				await harnessHooks.toolAfter(
 					{ sessionID: input.sessionID, tool: input.tool },
 					output as { output: string },
 				)
 				await graphAfterHook!(input, output)
+				// Comment checker runs last — inspects final output for AI slop
+				commentCheckerHooks.toolAfter(
+					{ sessionID: input.sessionID, tool: input.tool },
+					output as { output: string },
+				)
+				budgetHooks.onToolAfter(input, output as { output: string; metadata: unknown })
 			},
 			'permission.ask': async (input, output) => {
 				const loopName = loopService.resolveLoopName(input.sessionID)
@@ -421,6 +596,12 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 						harnessHooks.rememberMessages(sessionId, messages)
 					}
 				}
+
+				// Intent routing hint (advisory, non-blocking)
+				intentHooks.onMessagesTransform(output)
+				// User-prompt template injection
+				userPromptHooks.onMessagesTransform(output, { directory, projectId })
+
 				let userMessage: (typeof messages)[number] | undefined
 				for (let i = messages.length - 1; i >= 0; i--) {
 					if (messages[i].info.role === 'user') {
@@ -437,7 +618,11 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 				const isMuse = userMessage.info.agent === agents.muse.displayName
 				if (!isMuse) return
 
+				const museInfo = userMessage.info as Record<string, unknown>
 				userMessage.parts.push({
+					id: crypto.randomUUID(),
+					sessionID: (museInfo.sessionID as string) ?? '',
+					messageID: (museInfo.id as string) ?? '',
 					type: 'text',
 					text: `<system-reminder>
 You are in READ-ONLY mode for file system operations. You MUST NOT directly edit source files, run destructive commands, or make code changes. You may only read, search, and analyze the codebase.

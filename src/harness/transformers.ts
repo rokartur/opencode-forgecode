@@ -102,7 +102,7 @@ export function trimAssistant(messages: ForgeMessage[]): ForgeMessage[] {
 	return messages.map(msg => {
 		if (msg.role !== 'assistant') return msg
 		const seen: Array<{ op: Operation; idx: number }> = []
-		const keep = new Array<boolean>(msg.contents.length).fill(true)
+		const keep: boolean[] = Array.from({ length: msg.contents.length }, () => true)
 		for (let i = 0; i < msg.contents.length; i++) {
 			const call = msg.contents[i].tool_call
 			if (!call) continue

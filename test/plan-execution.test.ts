@@ -186,7 +186,7 @@ describe('Plan Execution Utilities', () => {
 			expect(result.executionName).toBe('database-optimization')
 		})
 
-		test('Falls back to title when no explicit loop name', () => {
+		test('extractLoopNames falls back to title when no explicit loop name', () => {
 			const plan = '# Fallback Title Here\n\nContent'
 			const result = extractLoopNames(plan)
 			expect(result.displayName).toBe('Fallback Title Here')

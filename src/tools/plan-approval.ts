@@ -1,6 +1,6 @@
 import type { ToolContext } from './types'
 import type { Hooks } from '@opencode-ai/plugin'
-import { parseModelString, retryWithModelFallback } from '../utils/model-fallback'
+import { parseModelString, resolveFallbackModelEntries, retryWithModelFallback } from '../utils/model-fallback'
 import { setupLoop } from './loop'
 import { DEFAULT_COMPLETION_SIGNAL } from '../services/loop'
 import { extractPlanTitle, extractLoopNames, PLAN_EXECUTION_LABELS } from '../utils/plan-execution'
@@ -43,6 +43,7 @@ export function createToolExecuteBeforeHook(ctx: ToolContext): Hooks['tool.execu
 
 export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execute.after'] {
 	const { loopService, logger, kvService, projectId, v2, config } = ctx
+	const forgeFallbackModels = resolveFallbackModelEntries(config.agents?.forge?.fallback_models)
 
 	return async (
 		input: { tool: string; sessionID: string; callID: string; args: unknown },
@@ -124,13 +125,13 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 								kvService.delete(projectId, `plan:${input.sessionID}`)
 
 								retryWithModelFallback(
-									() =>
+									candidate =>
 										v2.session.promptAsync({
 											sessionID: newSessionId,
 											directory: ctx.directory,
 											agent: 'forge',
 											parts: [{ type: 'text', text: planText }],
-											...(executionModel ? { model: executionModel } : {}),
+											model: candidate,
 										}),
 									() =>
 										v2.session.promptAsync({
@@ -141,6 +142,11 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 										}),
 									executionModel,
 									logger,
+									{
+										fallbackModels: forgeFallbackModels,
+										recoveryManager: ctx.recoveryManager,
+										recoverySessionId: newSessionId,
+									},
 								).then(({ result }) => {
 									if (result.error) {
 										logger.error('Plan approval: failed to send plan to new session', result.error)
@@ -228,6 +234,7 @@ export function createToolExecuteAfterHook(ctx: ToolContext): Hooks['tool.execut
 
 export function createPlanApprovalEventHook(ctx: ToolContext) {
 	const { v2, logger } = ctx
+	const forgeFallbackModels = resolveFallbackModelEntries(ctx.config.agents?.forge?.fallback_models)
 
 	return async (eventInput: { event: { type: string; properties?: Record<string, unknown> } }) => {
 		if (eventInput.event?.type !== 'session.status') return
@@ -250,13 +257,13 @@ export function createPlanApprovalEventHook(ctx: ToolContext) {
 		const inPlacePrompt = `The muse agent has created an implementation plan. You are now the forge agent taking over this session. Your job is to execute the plan — edit files, run commands, create tests, and implement every phase. Do NOT just describe or summarize the changes. Actually make them.${planRef}`
 
 		const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
-			() =>
+			candidate =>
 				v2.session.promptAsync({
 					sessionID,
 					directory: pending.directory,
 					agent: 'forge',
 					parts: [{ type: 'text' as const, text: inPlacePrompt }],
-					...(pending.executionModel ? { model: pending.executionModel } : {}),
+					model: candidate,
 				}),
 			() =>
 				v2.session.promptAsync({
@@ -267,6 +274,7 @@ export function createPlanApprovalEventHook(ctx: ToolContext) {
 				}),
 			pending.executionModel,
 			logger,
+			{ fallbackModels: forgeFallbackModels, recoveryManager: ctx.recoveryManager, recoverySessionId: sessionID },
 		)
 
 		if (promptResult.error) {

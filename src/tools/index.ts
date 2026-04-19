@@ -5,13 +5,20 @@ import { createPlanExecuteTools } from './plan-execute'
 import { createLoopTools } from './loop'
 import { createGraphTools } from './graph'
 import { createHarnessTools } from './harness'
+import { createPatchTools } from './patch'
+import { createAstTools } from './ast'
+import { createLspTools } from './lsp'
+import { createBackgroundTools } from './background'
+import { createCodeStatsTools } from './code-stats'
+import { createAgentAsTools } from '../runtime/agent-as-tool'
 import type { ToolContext } from './types'
 
 export { createToolExecuteBeforeHook, createToolExecuteAfterHook, createPlanApprovalEventHook } from './plan-approval'
 export type { ToolContext } from './types'
 
 /**
- * Creates all plugin tools by combining review, plan, plan-execute, loop, and graph tools.
+ * Creates all plugin tools by combining review, plan, plan-execute, loop, graph,
+ * harness, patch, AST, LSP, background, and agent-as-tool tools.
  *
  * @param ctx - Tool context with access to plugin services.
  * @returns Record of tool name to tool implementation.
@@ -24,5 +31,11 @@ export function createTools(ctx: ToolContext): Record<string, ReturnType<typeof 
 		...createLoopTools(ctx),
 		...createGraphTools(ctx),
 		...createHarnessTools(ctx),
+		...createPatchTools(ctx),
+		...createAstTools(ctx),
+		...createLspTools(ctx),
+		...createBackgroundTools(ctx),
+		...createCodeStatsTools(ctx),
+		...createAgentAsTools(ctx),
 	}
 }

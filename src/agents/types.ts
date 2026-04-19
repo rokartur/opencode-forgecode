@@ -1,7 +1,7 @@
 /**
  * Available agent roles in the plugin.
  */
-export type AgentRole = 'forge' | 'muse' | 'sage'
+export type AgentRole = 'forge' | 'muse' | 'sage' | 'librarian' | 'explore' | 'oracle' | 'prometheus' | 'metis'
 
 /**
  * Definition of an agent's capabilities and configuration.
@@ -40,6 +40,8 @@ export interface AgentDefinition {
 	steps?: number
 	/** Permission configuration for the agent. */
 	permission?: Record<string, unknown>
+	/** Whether this agent can be invoked as a tool by other agents. */
+	toolSupported?: boolean
 }
 
 /**

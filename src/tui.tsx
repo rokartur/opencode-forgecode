@@ -20,7 +20,16 @@ import {
 import { launchFreshLoop } from './utils/loop-launch'
 import { readPlan, writePlan, deletePlan } from './utils/tui-plan-store'
 import { readGraphStatus, formatGraphStatus } from './utils/tui-graph-status'
-import { readLoopStates, readLoopByName, shouldPollSidebar, type LoopInfo } from './utils/tui-refresh-helpers'
+import {
+	readLoopStates,
+	readLoopByName,
+	readBackgroundTasks,
+	readBudgetSnapshots,
+	shouldPollSidebar,
+	type LoopInfo,
+	type BackgroundTaskSummary,
+	type BudgetSnapshotSummary,
+} from './utils/tui-refresh-helpers'
 import {
 	readExecutionPreferences,
 	writeExecutionPreferences,
@@ -234,30 +243,25 @@ async function restartLoop(projectId: string, loopName: string, api: TuiPluginAp
 		}
 
 		// Use stored execution model with fallback
-		const { parseModelString, retryWithModelFallback } = await import('./utils/model-fallback')
+		const { parseModelString, resolveFallbackModelEntries, retryWithModelFallback } =
+			await import('./utils/model-fallback')
 		const loopModel =
 			parseModelString(state.executionModel) ??
 			parseModelString(config.loop?.model) ??
 			parseModelString(config.executionModel)
+		const fallbackModels = resolveFallbackModelEntries(config.agents?.forge?.fallback_models)
 
 		const promptParts: Array<{ type: 'text'; text: string }> = [{ type: 'text' as const, text: promptText }]
 
 		const { result: promptResult } = await retryWithModelFallback(
-			() =>
-				loopModel
-					? api.client.session.promptAsync({
-							sessionID: newSessionId,
-							directory,
-							agent: 'forge',
-							model: loopModel,
-							parts: promptParts,
-						})
-					: api.client.session.promptAsync({
-							sessionID: newSessionId,
-							directory,
-							agent: 'forge',
-							parts: promptParts,
-						}),
+			candidate =>
+				api.client.session.promptAsync({
+					sessionID: newSessionId,
+					directory,
+					agent: 'forge',
+					model: candidate,
+					parts: promptParts,
+				}),
 			() =>
 				api.client.session.promptAsync({
 					sessionID: newSessionId,
@@ -267,6 +271,7 @@ async function restartLoop(projectId: string, loopName: string, api: TuiPluginAp
 				}),
 			loopModel,
 			console,
+			{ fallbackModels },
 		)
 
 		if (promptResult.error) {
@@ -285,6 +290,12 @@ async function restartLoop(projectId: string, loopName: string, api: TuiPluginAp
 
 function formatTokens(n: number): string {
 	return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+}
+
+function progressBar(current: number, max: number, width = 10): string {
+	const ratio = Math.min(current / Math.max(max, 1), 1)
+	const filled = Math.round(ratio * width)
+	return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
 function formatDuration(ms: number): string {
@@ -526,31 +537,26 @@ function PlanViewerDialog(props: {
 					}
 
 					// Use execution model with retryWithModelFallback pattern
-					const { parseModelString, retryWithModelFallback } = await import('./utils/model-fallback')
+					const { parseModelString, resolveFallbackModelEntries, retryWithModelFallback } =
+						await import('./utils/model-fallback')
 					const { loadPluginConfig } = await import('./setup')
 					const config = loadPluginConfig()
 					const model =
 						parseModelString(executionModel) ??
 						parseModelString(config.loop?.model) ??
 						parseModelString(config.executionModel)
+					const fallbackModels = resolveFallbackModelEntries(config.agents?.forge?.fallback_models)
 
 					const promptParts = [{ type: 'text' as const, text: planText }]
 					const { result: promptResult } = await retryWithModelFallback(
-						() =>
-							model
-								? props.api.client.session.promptAsync({
-										sessionID: newSessionId,
-										directory,
-										agent: 'forge',
-										model,
-										parts: promptParts,
-									})
-								: props.api.client.session.promptAsync({
-										sessionID: newSessionId,
-										directory,
-										agent: 'forge',
-										parts: promptParts,
-									}),
+						candidate =>
+							props.api.client.session.promptAsync({
+								sessionID: newSessionId,
+								directory,
+								agent: 'forge',
+								model: candidate,
+								parts: promptParts,
+							}),
 						() =>
 							props.api.client.session.promptAsync({
 								sessionID: newSessionId,
@@ -560,6 +566,7 @@ function PlanViewerDialog(props: {
 							}),
 						model,
 						console,
+						{ fallbackModels },
 					)
 
 					if (promptResult.error) {
@@ -608,31 +615,26 @@ function PlanViewerDialog(props: {
 				const inPlacePrompt = `The architect agent has created an implementation plan. You are now the code agent taking over this session. Your job is to execute the plan — edit files, run commands, create tests, and implement every phase. Do NOT just describe or summarize the changes. Actually make them.\n\nImplementation Plan:\n${planText}`
 
 				try {
-					const { parseModelString, retryWithModelFallback } = await import('./utils/model-fallback')
+					const { parseModelString, resolveFallbackModelEntries, retryWithModelFallback } =
+						await import('./utils/model-fallback')
 					const { loadPluginConfig } = await import('./setup')
 					const config = loadPluginConfig()
 					const model =
 						parseModelString(executionModel) ??
 						parseModelString(config.loop?.model) ??
 						parseModelString(config.executionModel)
+					const fallbackModels = resolveFallbackModelEntries(config.agents?.forge?.fallback_models)
 
 					const promptParts = [{ type: 'text' as const, text: inPlacePrompt }]
 					const { result: promptResult } = await retryWithModelFallback(
-						() =>
-							model
-								? props.api.client.session.promptAsync({
-										sessionID: props.sessionId,
-										directory,
-										agent: 'forge',
-										model,
-										parts: promptParts,
-									})
-								: props.api.client.session.promptAsync({
-										sessionID: props.sessionId,
-										directory,
-										agent: 'forge',
-										parts: promptParts,
-									}),
+						candidate =>
+							props.api.client.session.promptAsync({
+								sessionID: props.sessionId,
+								directory,
+								agent: 'forge',
+								model: candidate,
+								parts: promptParts,
+							}),
 						() =>
 							props.api.client.session.promptAsync({
 								sessionID: props.sessionId,
@@ -642,6 +644,7 @@ function PlanViewerDialog(props: {
 							}),
 						model,
 						console,
+						{ fallbackModels },
 					)
 
 					if (promptResult.error) {
@@ -1012,8 +1015,16 @@ function LoopDetailsDialog(props: { api: TuiPluginApi; loop: LoopInfo; onBack?: 
 					<text fg={theme().textMuted}>
 						Iteration {currentLoop().iteration}
 						{currentLoop().maxIterations > 0 ? `/${currentLoop().maxIterations}` : ''}
+						{currentLoop().maxIterations > 0
+							? ` ${progressBar(currentLoop().iteration, currentLoop().maxIterations)}`
+							: ''}
 					</text>
 				</box>
+				<Show when={currentLoop().modelFailed}>
+					<box>
+						<text fg={theme().warning}>⚠ Using fallback model</text>
+					</box>
+				</Show>
 			</box>
 
 			<Show when={loading()}>
@@ -1077,6 +1088,9 @@ function LoopDetailsDialog(props: { api: TuiPluginApi; loop: LoopInfo; onBack?: 
 							<box>
 								<text fg={theme().text}>
 									<span style={{ fg: theme().textMuted }}>Cost: </span>${stats()!.cost.toFixed(4)}
+									{currentLoop().totalCostUsd != null
+										? ` (loop total: $${currentLoop().totalCostUsd!.toFixed(4)})`
+										: ''}
 								</text>
 							</box>
 							<Show when={stats()!.fileChanges}>
@@ -1153,6 +1167,8 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 	const [open, setOpen] = createSignal(true)
 	const [loops, setLoops] = createSignal<LoopInfo[]>([])
 	const [hasPlan, setHasPlan] = createSignal(false)
+	const [bgTasks, setBgTasks] = createSignal<BackgroundTaskSummary[]>([])
+	const [budgets, setBudgets] = createSignal<BudgetSnapshotSummary[]>([])
 	const [graphStatusFormatted, setGraphStatusFormatted] = createSignal<ReturnType<typeof formatGraphStatus> | null>(
 		null,
 	)
@@ -1221,6 +1237,12 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 		const status = readGraphStatus(pid, undefined, directory)
 		setGraphStatusRaw(status)
 		setGraphStatusFormatted(formatGraphStatus(status))
+
+		// Refresh background task summary
+		setBgTasks(readBackgroundTasks())
+
+		// Refresh budget snapshots (scoped to current session when available)
+		setBudgets(readBudgetSnapshots(pid, props.sessionId))
 	}
 
 	const unsub = props.api.event.on('session.status', () => {
@@ -1253,7 +1275,7 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 	}, 2000)
 
 	createEffect(() => {
-		if (shouldPollSidebar(loops(), graphStatusRaw())) {
+		if (shouldPollSidebar(loops(), graphStatusRaw()) || bgTasks().length > 0) {
 			startPolling()
 		} else {
 			stopPolling()
@@ -1270,6 +1292,8 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 		if (hasPlan()) return true
 		if (props.opts.showLoops && loops().length > 0) return true
 		if (graphStatusFormatted()) return true
+		if (bgTasks().length > 0) return true
+		if (budgets().some(b => b.warnings.length > 0 || b.violations.length > 0)) return true
 		return false
 	})
 
@@ -1374,10 +1398,63 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 									<text fg={theme().text} wrapMode='word'>
 										{truncateMiddle(loop.name, 25)}{' '}
 										<span style={{ fg: theme().textMuted }}>{statusText(loop)}</span>
+										{loop.modelFailed ? <span style={{ fg: theme().warning }}> ⚠fb</span> : ''}
 									</text>
 								</box>
 							)}
 						</For>
+					</Show>
+					<Show when={bgTasks().length > 0}>
+						<box flexDirection='column' paddingTop={1}>
+							<text fg={theme().text}>
+								<b>Background ({bgTasks().length})</b>
+							</text>
+							<For each={bgTasks()}>
+								{task => (
+									<box flexDirection='row' gap={1}>
+										<text
+											flexShrink={0}
+											style={{
+												fg: task.status === 'running' ? theme().success : theme().textMuted,
+											}}
+										>
+											•
+										</text>
+										<text fg={theme().text} wrapMode='word'>
+											{truncateMiddle(task.targetAgent, 15)}{' '}
+											<span style={{ fg: theme().textMuted }}>{task.status}</span>
+										</text>
+									</box>
+								)}
+							</For>
+						</box>
+					</Show>
+					<Show when={budgets().some(b => b.warnings.length > 0 || b.violations.length > 0)}>
+						<box flexDirection='column' paddingTop={1}>
+							<text fg={theme().text}>
+								<b>Budgets</b>
+							</text>
+							<For each={budgets().filter(b => b.warnings.length > 0 || b.violations.length > 0)}>
+								{snap => {
+									const hasViolation = snap.violations.length > 0
+									const dotColor = hasViolation ? theme().error : theme().warning
+									const label = hasViolation
+										? `exceeded ${snap.violations.join(', ')}`
+										: `approaching ${snap.warnings.join(', ')}`
+									return (
+										<box flexDirection='row' gap={1}>
+											<text flexShrink={0} style={{ fg: dotColor }}>
+												•
+											</text>
+											<text fg={theme().text} wrapMode='word'>
+												{truncateMiddle(snap.agent, 12)}{' '}
+												<span style={{ fg: theme().textMuted }}>{label}</span>
+											</text>
+										</box>
+									)
+								}}
+							</For>
+						</box>
 					</Show>
 				</Show>
 			</box>
@@ -1387,10 +1464,21 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions; sessionId?: strin
 
 const id = 'oc-forge'
 
+// Startup marker so we can tell from logs whether tui.js was loaded at all
+// by opencode's TUI process. If this line never appears in forge.log, the
+// plugin bundle wasn't imported (stale cache, wrong path, or resolution
+// failure in opencode).
+writeTuiDebug('tui module loaded', { id, version: VERSION, pid: process.pid })
+
 // Export helper functions for testing
 export { readLoopStates, readLoopByName }
 
 const tui: TuiPlugin = async api => {
+	writeTuiDebug('tui factory invoked', {
+		directory: api.state.path.directory,
+		hasSlots: !!api.slots,
+		hasCommand: !!api.command,
+	})
 	const tuiConfig = loadTuiConfig()
 	const opts: TuiOptions = {
 		sidebar: tuiConfig?.sidebar ?? true,
@@ -1398,6 +1486,7 @@ const tui: TuiPlugin = async api => {
 		showVersion: tuiConfig?.showVersion ?? true,
 		keybinds: { ...DEFAULT_KEYBINDS, ...tuiConfig?.keybinds },
 	}
+	writeTuiDebug('tui options resolved', { opts })
 
 	api.command.register(() => {
 		const directory = api.state.path.directory

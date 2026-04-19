@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs'
-import { join, isAbsolute } from 'path'
+import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs'
+import { join } from 'path'
 import type { PluginConfig } from '../src/types'
 import {
 	resolveWorktreeLogDirectory,
@@ -10,10 +10,9 @@ import {
 	logWorktreeCompletion,
 	buildWorktreeCompletionPayload,
 	writeWorktreeCompletionLog,
-	formatWorktreeCompletionEntry,
+	_formatWorktreeCompletionEntry,
 } from '../src/services/worktree-log'
 import { buildLoopPermissionRuleset } from '../src/constants/loop'
-import type { LoopSessionOutput } from '../src/services/loop'
 
 const TEST_DIR = '/tmp/opencode-worktree-log-test-' + Date.now()
 

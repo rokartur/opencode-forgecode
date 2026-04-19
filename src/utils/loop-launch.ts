@@ -17,7 +17,7 @@ import { buildLoopPermissionRuleset } from '../constants/loop'
 import { resolveWorktreeLogTarget } from '../services/worktree-log'
 import { agents } from '../agents'
 import { waitForGraphReady } from './tui-graph-status'
-import { retryWithModelFallback, parseModelString } from './model-fallback'
+import { retryWithModelFallback, parseModelString, resolveFallbackModelEntries } from './model-fallback'
 import { loadPluginConfig } from '../setup'
 
 export interface FreshLoopOptions {
@@ -255,24 +255,18 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
 		parseModelString(options.executionModel) ??
 		parseModelString(config.loop?.model) ??
 		parseModelString(config.executionModel)
+	const forgeFallbackModels = resolveFallbackModelEntries(config.agents?.forge?.fallback_models)
 
 	const promptParts = [{ type: 'text' as const, text: promptText }]
 	const { result: promptResult } = await retryWithModelFallback(
-		() =>
-			loopModel
-				? api.client.session.promptAsync({
-						sessionID: sessionId,
-						directory: sessionDirectory,
-						agent: 'forge',
-						model: loopModel,
-						parts: promptParts,
-					})
-				: api.client.session.promptAsync({
-						sessionID: sessionId,
-						directory: sessionDirectory,
-						agent: 'forge',
-						parts: promptParts,
-					}),
+		candidate =>
+			api.client.session.promptAsync({
+				sessionID: sessionId,
+				directory: sessionDirectory,
+				agent: 'forge',
+				model: candidate,
+				parts: promptParts,
+			}),
 		() =>
 			api.client.session.promptAsync({
 				sessionID: sessionId,
@@ -282,6 +276,7 @@ export async function launchFreshLoop(options: FreshLoopOptions): Promise<Launch
 			}),
 		loopModel,
 		console,
+		{ fallbackModels: forgeFallbackModels },
 	)
 
 	if (promptResult.error) {

@@ -10,7 +10,7 @@ import type { PluginConfig } from '../src/types'
 describe('resolveLoopModel', () => {
 	const createMockLoopService = (state: any) =>
 		({
-			getActiveState: (name: string) => state,
+			getActiveState: (_name: string) => state,
 		}) as any
 
 	it('returns undefined when modelFailed is true', () => {
@@ -59,7 +59,7 @@ describe('resolveLoopModel', () => {
 describe('resolveLoopAuditorModel', () => {
 	const createMockLoopService = (state: any) =>
 		({
-			getActiveState: (name: string) => state,
+			getActiveState: (_name: string) => state,
 		}) as any
 
 	it('prefers state.auditorModel over all config values', () => {

@@ -2,6 +2,7 @@ import type { KvService, KvEntry } from './kv'
 import type { Logger, LoopConfig } from '../types'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import { findPartialMatch } from '../utils/partial-match'
+import { execSync } from 'child_process'
 
 export function migrateRalphKeys(kvService: KvService, projectId: string, logger: Logger): void {
 	const oldEntries = kvService.listByPrefix(projectId, 'ralph:')
@@ -73,6 +74,10 @@ export interface LoopState {
 	completionSummary?: string
 	executionModel?: string
 	auditorModel?: string
+	/** Cumulative token usage across all iterations. */
+	totalTokens?: number
+	/** Cumulative cost in USD. */
+	totalCostUsd?: number
 }
 
 export interface LoopService {
@@ -633,4 +638,55 @@ export async function fetchSessionOutput(
 		}
 		return null
 	}
+}
+
+/**
+ * Run success-criteria commands and return which ones failed.
+ * Each command is run synchronously in the working directory.
+ * Returns an empty array if all criteria pass.
+ */
+export function checkSuccessCriteria(
+	criteria: { tests?: string; lint?: string; custom?: string[] },
+	cwd: string,
+): Array<{ label: string; command: string; error: string }> {
+	const failures: Array<{ label: string; command: string; error: string }> = []
+
+	function run(label: string, command: string): void {
+		try {
+			execSync(command, { cwd, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe' })
+		} catch (err) {
+			const msg = err instanceof Error ? ((err as { stderr?: string }).stderr ?? err.message) : String(err)
+			failures.push({ label, command, error: msg.slice(0, 500) })
+		}
+	}
+
+	if (criteria.tests) run('tests', criteria.tests)
+	if (criteria.lint) run('lint', criteria.lint)
+	if (criteria.custom) {
+		for (const cmd of criteria.custom) {
+			run(`custom(${cmd.slice(0, 30)})`, cmd)
+		}
+	}
+
+	return failures
+}
+
+/**
+ * Check whether a loop has exceeded its budget.
+ * Returns a descriptive string if exceeded, null if within budget.
+ */
+export function checkBudgetExceeded(
+	budget: { maxTokens?: number; maxCostUsd?: number; maxIterations?: number },
+	state: { iteration: number; totalTokens?: number; totalCostUsd?: number },
+): string | null {
+	if (budget.maxIterations && state.iteration >= budget.maxIterations) {
+		return `Iteration limit reached: ${state.iteration}/${budget.maxIterations}`
+	}
+	if (budget.maxTokens && (state.totalTokens ?? 0) >= budget.maxTokens) {
+		return `Token budget exceeded: ${state.totalTokens}/${budget.maxTokens}`
+	}
+	if (budget.maxCostUsd && (state.totalCostUsd ?? 0) >= budget.maxCostUsd) {
+		return `Cost budget exceeded: $${(state.totalCostUsd ?? 0).toFixed(4)}/$${budget.maxCostUsd}`
+	}
+	return null
 }
