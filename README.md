@@ -563,17 +563,6 @@ bun test                 # 756+ tests
 bun run build            # Emit dist/
 ```
 
-### Project Stats
-
-| Metric                           | Value                 |
-| -------------------------------- | --------------------- |
-| Source files                     | ~178 TypeScript files |
-| Exported functions/classes/types | ~773                  |
-| Test cases                       | 756+ passing          |
-| Agents                           | 9                     |
-| Tools                            | 30+                   |
-| Hooks                            | 16                    |
-
 ---
 
 ## License
