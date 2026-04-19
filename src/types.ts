@@ -517,6 +517,60 @@ export interface HarnessConfig {
 }
 
 /**
+ * Delta-read configuration — returns diffs on re-reads instead of full content.
+ */
+export interface DeltaReadConfig {
+	/** Enable delta-read mode. Defaults to true. */
+	enabled?: boolean
+	/** Max cached files per session. Defaults to 100. */
+	maxCachePerSession?: number
+	/** Max diff output in chars before falling back to full read. Defaults to 1500. */
+	maxDiffChars?: number
+	/** Glob patterns to exclude from caching. */
+	excludePatterns?: string[]
+}
+
+/**
+ * Tool result archiving — stores large outputs on disk and replaces with preview.
+ */
+export interface ToolArchiveConfig {
+	/** Enable tool result archiving. Defaults to true. */
+	enabled?: boolean
+	/** Minimum output size (chars) to trigger archiving. Defaults to 4096. */
+	thresholdChars?: number
+	/** TTL for archived entries in milliseconds. Defaults to 24h. */
+	ttlMs?: number
+	/** Tools whose output should never be archived. */
+	exemptTools?: string[]
+}
+
+/**
+ * Context quality scoring configuration.
+ */
+export interface QualityScoreConfig {
+	/** Enable quality scoring. Defaults to true. */
+	enabled?: boolean
+	/** Score threshold below which to emit nudge. Defaults to 60. */
+	nudgeThreshold?: number
+	/** Cooldown between nudges in milliseconds. Defaults to 5 minutes. */
+	nudgeCooldownMs?: number
+	/** Max nudges per session. Defaults to 3. */
+	maxNudgesPerSession?: number
+}
+
+/**
+ * Progressive checkpoint configuration.
+ */
+export interface CheckpointsConfig {
+	/** Enable progressive checkpoints. Defaults to true. */
+	enabled?: boolean
+	/** Context fill thresholds (0–100) at which to capture checkpoints. */
+	fillThresholds?: number[]
+	/** Quality score thresholds below which to capture checkpoints. */
+	qualityThresholds?: number[]
+}
+
+/**
  * Complete plugin configuration for opencode-forge.
  */
 export interface PluginConfig {
@@ -576,6 +630,14 @@ export interface PluginConfig {
 	rtk?: RtkConfig
 	/** Host-side fast-path tool configuration (ripgrep-based grep/glob). */
 	host?: HostConfig
+	/** Delta-read configuration — returns diffs on re-reads. */
+	deltaRead?: DeltaReadConfig
+	/** Tool result archiving configuration. */
+	toolArchive?: ToolArchiveConfig
+	/** Context quality scoring configuration. */
+	qualityScore?: QualityScoreConfig
+	/** Progressive checkpoint configuration. */
+	checkpoints?: CheckpointsConfig
 }
 
 /**

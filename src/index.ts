@@ -21,6 +21,8 @@ import {
 } from './tools'
 import { createSandboxToolBeforeHook, createSandboxToolAfterHook } from './hooks/sandbox-tools'
 import { createHostToolBeforeHook, createHostToolAfterHook } from './hooks/host-tools'
+import { createDeltaReadBeforeHook, createDeltaReadAfterHook } from './hooks/delta-read'
+import { createToolArchiveAfterHook } from './hooks/tool-archive'
 import { createGraphCommandEventHook } from './hooks/graph-command'
 import { createGraphToolBeforeHook, createGraphToolAfterHook } from './hooks/graph-tools'
 import type { ToolContext } from './tools'
@@ -44,6 +46,8 @@ import { ensureRtkInstalled } from './runtime/rtk'
 import { createRtkGuidanceHooks } from './hooks/rtk-guidance'
 import { createCommentCheckerHooks } from './hooks/comment-checker'
 import { createSessionRetryHooks } from './hooks/session-retry'
+import { createToolArchiveService } from './services/tool-archive'
+import { QualityScorer, ProgressiveCheckpointManager } from './harness'
 import { runAutoModelSetup } from './runtime/auto-model-setup'
 
 /**
@@ -198,6 +202,33 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 		const userPromptHooks = createUserPromptTemplateHooks(logger, config)
 		const rtkHooks = createRtkGuidanceHooks(logger, config)
 		const commentCheckerHooks = createCommentCheckerHooks(logger, config)
+
+		// Stage 5 hooks — token optimization
+		const deltaReadBeforeHook = createDeltaReadBeforeHook({
+			logger,
+			cwd: directory,
+			config: config.deltaRead,
+		})
+		const deltaReadAfterHook = createDeltaReadAfterHook({
+			logger,
+			cwd: directory,
+			config: config.deltaRead,
+		})
+
+		const archiveService =
+			config.toolArchive?.enabled !== false
+				? createToolArchiveService(kvService, projectId, logger, config.toolArchive)
+				: null
+		const toolArchiveAfterHook = archiveService
+			? createToolArchiveAfterHook({ archiveService, logger, enabled: true })
+			: null
+
+		const qualityScorer = config.qualityScore?.enabled !== false ? new QualityScorer(logger) : null
+
+		const checkpointManager =
+			config.checkpoints?.enabled !== false && qualityScorer
+				? new ProgressiveCheckpointManager(kvService, projectId, logger, qualityScorer, config.checkpoints)
+				: null
 
 		const loopHandler = createLoopEventHandler(
 			loopService,
@@ -440,6 +471,16 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 		}
 
 		const tools = createTools(ctx)
+		// Add expand tool for archived results retrieval
+		if (archiveService) {
+			const { createExpandTools } = await import('./tools/expand')
+			Object.assign(tools, createExpandTools(ctx, archiveService))
+		}
+		// Add quality tool for context quality scoring
+		if (qualityScorer) {
+			const { createQualityTools } = await import('./tools/quality')
+			Object.assign(tools, createQualityTools(ctx, qualityScorer))
+		}
 		const toolExecuteBeforeHook = createToolExecuteBeforeHook(ctx)
 		const toolExecuteAfterHook = createToolExecuteAfterHook(ctx)
 		const planApprovalEventHook = createPlanApprovalEventHook(ctx)
@@ -505,6 +546,29 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 					input as { sessionID: string; messageID?: string; agent?: string },
 					output as { parts: Array<Record<string, unknown>> },
 				)
+
+				// Quality scoring + checkpoint check on each user message
+				const msgInput = input as { sessionID: string }
+				if (qualityScorer && msgInput.sessionID) {
+					qualityScorer.recordMessage(msgInput.sessionID, '', true)
+					const { nudge, result } = qualityScorer.shouldNudge(msgInput.sessionID, config.qualityScore)
+					if (nudge) {
+						logger.log(
+							`[quality] nudge for session ${msgInput.sessionID}: ${result.score} (${result.grade})`,
+						)
+						try {
+							await v2.tui.appendPrompt({
+								directory,
+								text: `[Forge] Context quality: ${result.score}/100 (${result.grade}). Consider /compact or starting a new session.`,
+							})
+						} catch (err) {
+							logger.debug('[quality] tui.appendPrompt failed', err)
+						}
+					}
+					// Check checkpoint thresholds
+					checkpointManager?.recordMessage(msgInput.sessionID, 0)
+					checkpointManager?.checkAndCapture(msgInput.sessionID)
+				}
 			},
 			event: async input => {
 				const eventInput = input as {
@@ -539,6 +603,10 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 					tool: input.tool,
 					args: output.args,
 				})
+				// Delta-read: intercept re-reads and serve diffs
+				await deltaReadBeforeHook!(input, output)
+				// Quality scorer: track tool calls
+				qualityScorer?.recordToolCall(input.sessionID)
 				await toolExecuteBeforeHook!(input, output)
 				await hostBeforeHook!(input, output)
 				await sandboxBeforeHook!(input, output)
@@ -550,10 +618,14 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 						`[tool-after] ${input.tool} callID=${input.callID} output=${output.output?.slice(0, 200)}`,
 					)
 				}
-				// Order reverse of before: sandbox → host → existing → harness → graph
+				// Order reverse of before: sandbox → host → existing → archive → delta → harness → graph
 				await sandboxAfterHook!(input, output)
 				await hostAfterHook!(input, output)
 				await toolExecuteAfterHook!(input, output)
+				// Tool archive: store large outputs before truncation
+				if (toolArchiveAfterHook) await toolArchiveAfterHook(input, output)
+				// Delta-read: cache file contents or serve pending diffs
+				await deltaReadAfterHook!(input, output)
 				await harnessHooks.toolAfter(
 					{ sessionID: input.sessionID, tool: input.tool },
 					output as { output: string },
@@ -588,10 +660,20 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 					input: input as { sessionID: string },
 					output: output as { context: string[]; prompt?: string },
 				}
+				// Record compaction for quality tracking
+				qualityScorer?.recordCompaction(typed.input.sessionID)
 				// Harness summary-frame wins when enabled; fall back to legacy custom prompt.
 				await harnessHooks.compact(typed.input, typed.output)
 				if (!typed.output.prompt) {
 					await sessionHooks.onCompacting(typed.input, typed.output)
+				}
+				// Enrich compaction with checkpoint restore context
+				if (checkpointManager && typed.output.prompt) {
+					const restoreCtx = checkpointManager.buildRestoreContext(typed.input.sessionID)
+					if (restoreCtx) {
+						typed.output.prompt = typed.output.prompt + '\n\n' + restoreCtx
+						logger.log(`[checkpoints] enriched compaction with checkpoint context`)
+					}
 				}
 			},
 			'experimental.chat.messages.transform': async (

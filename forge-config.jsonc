@@ -194,4 +194,28 @@
 			"user_prompt": "",
 		},
 	},
+
+	// Delta-read mode — returns diffs on re-reads instead of full file content
+	"deltaRead": {
+		"enabled": true,
+		"maxCachePerSession": 100,
+		"maxDiffChars": 1500,
+	},
+
+	// Tool result archiving — large outputs archived to disk, replaced with preview
+	"toolArchive": {
+		"enabled": true,
+		"thresholdChars": 4096,
+	},
+
+	// Context quality scoring — 7-signal composite health tracker
+	"qualityScore": {
+		"enabled": true,
+		"nudgeThreshold": 60,
+	},
+
+	// Progressive checkpoints — snapshot session state at fill thresholds
+	"checkpoints": {
+		"enabled": true,
+	},
 }

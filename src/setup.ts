@@ -134,6 +134,10 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
 		restrictedShell: config.restrictedShell,
 		telemetry: config.telemetry,
 		rtk: config.rtk,
+		deltaRead: config.deltaRead,
+		toolArchive: config.toolArchive,
+		qualityScore: config.qualityScore,
+		checkpoints: config.checkpoints,
 	}
 
 	if (normalized.sandbox) {

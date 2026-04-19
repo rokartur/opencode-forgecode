@@ -26,3 +26,7 @@ export {
 } from './snapshot'
 export type { SnapshotEntry, SnapshotLocation } from './snapshot'
 export { currentEnv, systemInfo, skillInstructions, toolErrorReflection } from './system-prompt'
+export { QualityScorer, formatQualityReport } from './quality-score'
+export type { QualityResult, QualitySignals, Grade } from './quality-score'
+export { ProgressiveCheckpointManager } from './progressive-checkpoints'
+export type { Checkpoint } from './progressive-checkpoints'

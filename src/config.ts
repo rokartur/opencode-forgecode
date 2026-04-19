@@ -8,6 +8,95 @@ const PROMPT_REVIEW = readFileSync(join(__dirname, 'command/template/review.txt'
 
 const REPLACED_BUILTIN_AGENTS = ['build', 'plan']
 
+/**
+ * Providers for which we proactively set generous SSE/request timeouts so that
+ * long reasoning gaps on high-effort models (e.g. gpt-5.4 reasoningEffort=high)
+ * don't trip opencode's default stream abort, which surfaces in the TUI as
+ * "~ Preparing patch... / Tool execution aborted / The operation timed out".
+ *
+ * - `timeout` (total request budget): 10 minutes. opencode default is 5 min;
+ *   a full high-effort turn with many tool calls can exceed 5 min.
+ * - `chunkTimeout` (max silence between SSE chunks): 5 minutes. Observed gaps
+ *   between provider chunks on `reasoningEffort: high` regularly exceed 40 s
+ *   and can stretch past 2 min on complex tool sequences. 5 min leaves margin
+ *   without wedging the CLI forever on a genuinely stuck request.
+ *
+ * These are applied ONLY when the user has not explicitly configured a value
+ * for that provider — we never overwrite an explicit user setting.
+ */
+const TIMEOUT_DEFAULTS_PROVIDERS = [
+	'openai',
+	'anthropic',
+	'google',
+	'google-vertex',
+	'openrouter',
+	'xai',
+	'deepseek',
+	'groq',
+	'mistral',
+	'azure',
+	'bedrock',
+	'copilot',
+	'ollama',
+] as const
+const DEFAULT_REQUEST_TIMEOUT_MS = 600_000 // 10 min
+const DEFAULT_CHUNK_TIMEOUT_MS = 300_000 // 5 min silence between SSE chunks
+
+function applyStreamTimeoutDefaults(config: Record<string, unknown>): void {
+	const providerSection = (config.provider ?? {}) as Record<string, unknown>
+
+	const ensureProviderTimeouts = (id: string) => {
+		const existing = (providerSection[id] ?? {}) as Record<string, unknown>
+		const existingOptions = (existing.options ?? {}) as Record<string, unknown>
+
+		// Only fill in values the user didn't set — never overwrite.
+		const options: Record<string, unknown> = { ...existingOptions }
+		if (options.timeout === undefined) options.timeout = DEFAULT_REQUEST_TIMEOUT_MS
+		if (options.chunkTimeout === undefined) options.chunkTimeout = DEFAULT_CHUNK_TIMEOUT_MS
+
+		providerSection[id] = { ...existing, options }
+	}
+
+	// Patch providers already present in the user config (so their options
+	// get the missing timeout fields) plus the known-common providers, so new
+	// users benefit without having to touch opencode.json.
+	const ids = new Set<string>([...Object.keys(providerSection), ...TIMEOUT_DEFAULTS_PROVIDERS])
+	for (const id of ids) ensureProviderTimeouts(id)
+
+	config.provider = providerSection
+}
+
+/**
+ * Vercel AI SDK (used inside opencode's `streamText`) has its OWN
+ * chunk/step/request timeouts derived from `streamText({ timeout })`, which
+ * are independent from the provider-options `chunkTimeout` we set above.
+ * Those surface as a Bun `DOMException: The operation timed out.` after as
+ * little as 20–30s of reasoning silence on gpt-5 high.
+ *
+ * Opencode threads `agent.options` straight into `streamText(...)`, so we
+ * also inject a generous `timeout` there for every agent the plugin owns
+ * (plus the standard built-ins) unless the user has set their own.
+ */
+function applyAgentTimeoutDefaults(mergedAgents: Record<string, AgentConfig>): void {
+	for (const [name, agentCfg] of Object.entries(mergedAgents)) {
+		if (!agentCfg) continue
+		const existingOptions = ((agentCfg as unknown as Record<string, unknown>).options ?? {}) as Record<
+			string,
+			unknown
+		>
+		if (existingOptions.timeout !== undefined) continue // user wins
+		mergedAgents[name] = {
+			...(agentCfg as AgentConfig),
+			options: {
+				...existingOptions,
+				// Single scalar covers overall/step/chunk timeouts in AI SDK.
+				// 5 minutes between chunks is plenty for reasoningEffort: high.
+				timeout: DEFAULT_CHUNK_TIMEOUT_MS,
+			},
+		} as AgentConfig
+	}
+}
+
 const ENHANCED_BUILTIN_AGENTS: Record<string, { permission: Record<string, string>; prompt?: string }> = {
 	explore: {
 		permission: {
@@ -184,8 +273,52 @@ export function createConfigHandler(
 			} as AgentConfig
 		}
 
+		applyAgentTimeoutDefaults(mergedAgents)
+
 		config.agent = mergedAgents
 		config.default_agent = 'forge'
+
+		// Inject generous SSE/request timeouts so long reasoning gaps on
+		// high-effort models (gpt-5.4 high, etc.) don't surface as
+		// "Tool execution aborted / operation timed out" mid-stream.
+		// Works for any provider and any reasoningEffort level — never
+		// overwrites values the user has explicitly configured.
+		applyStreamTimeoutDefaults(config)
+
+		// Visible breadcrumb in opencode log so we can confirm this build of
+		// the plugin is actually loaded (timestamps alone have been misleading).
+		try {
+			const providerCount = Object.keys((config.provider as Record<string, unknown>) ?? {}).length
+			const agentCount = Object.keys(mergedAgents).length
+			console.log(
+				`[forge] stream timeouts injected (providers=${providerCount}, agents=${agentCount}, chunk=${DEFAULT_CHUNK_TIMEOUT_MS}ms, request=${DEFAULT_REQUEST_TIMEOUT_MS}ms)`,
+			)
+		} catch {}
+
+		// Also dump to a file so we can forensically confirm plugin ran
+		// and see the shape of the config that went through our hook.
+		try {
+			const fs = await import('node:fs/promises')
+			const os = await import('node:os')
+			const path = await import('node:path')
+			const dumpDir = path.join(os.homedir(), '.cache', 'opencode-forge')
+			await fs.mkdir(dumpDir, { recursive: true })
+			const snapshot = {
+				ts: new Date().toISOString(),
+				providers: Object.fromEntries(
+					Object.entries(
+						(config.provider as Record<string, { options?: Record<string, unknown> }>) ?? {},
+					).map(([k, v]) => [k, v?.options ?? null]),
+				),
+				agentTimeouts: Object.fromEntries(
+					Object.entries(mergedAgents).map(([k, v]) => {
+						const opts = (v as unknown as { options?: Record<string, unknown> }).options
+						return [k, opts?.timeout ?? null]
+					}),
+				),
+			}
+			await fs.writeFile(path.join(dumpDir, 'last-config.json'), JSON.stringify(snapshot, null, 2))
+		} catch {}
 
 		const userCommands = config.command as Record<string, unknown> | undefined
 		const mergedCommands: Record<string, unknown> = { ...PLUGIN_COMMANDS }
