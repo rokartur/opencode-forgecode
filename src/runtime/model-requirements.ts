@@ -91,8 +91,8 @@ export const AGENT_CHAINS: Record<string, AgentChain> = {
 	forge: {
 		rationale: 'Primary coding agent — needs top-tier code generation & tool-calling.',
 		chain: [
-			{ providers: ['anthropic', 'github-copilot', 'opencode'], model: 'claude-opus-4-7'  },
-            { providers: ['anthropic', 'github-copilot', 'opencode'], model: 'claude-sonnet-4-6' },
+			{ providers: ['anthropic', 'github-copilot', 'opencode'], model: 'claude-opus-4-7' },
+			{ providers: ['anthropic', 'github-copilot', 'opencode'], model: 'claude-sonnet-4-6' },
 			{ providers: ['openai', 'github-copilot', 'opencode'], model: 'gpt-5.4', variant: 'high' },
 			{ providers: ['zai-coding-plan', 'opencode', 'opencode-go'], model: 'glm-5.1' },
 		],

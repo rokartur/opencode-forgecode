@@ -169,10 +169,7 @@ export function computeAgentAssignments(
 // Config merging & persistence
 // ---------------------------------------------------------------------------
 
-export function mergeAssignmentsIntoConfig(
-	pluginConfig: PluginConfig,
-	assignments: AgentAssignment[],
-): PluginConfig {
+export function mergeAssignmentsIntoConfig(pluginConfig: PluginConfig, assignments: AgentAssignment[]): PluginConfig {
 	if (assignments.length === 0) return pluginConfig
 	const agents: Record<string, AgentOverrideConfig> = { ...pluginConfig.agents }
 	for (const a of assignments) {
