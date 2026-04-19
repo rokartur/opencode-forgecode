@@ -208,19 +208,19 @@ oc-forgecode <command> [options]
 └──────────────┬───────────────────────────────────────────┘
                │
                ▼
-┌──────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────────────────────┐
 │              opencode-forgecode plugin                    │
-│                                                          │
-│  ┌─────────────────┐  ┌──────────────────────────────┐   │
+│                                                           │
+│  ┌──────────────────┐  ┌──────────────────────────────┐   │
 │  │  9 Agents        │  │  Hooks Pipeline              │   │
 │  │  forge·muse·sage │  │  chat.message                │   │
 │  │  explore·oracle  │  │  tool.execute.before/after   │   │
 │  │  librarian       │  │  event                       │   │
 │  │  prometheus      │  │  permission.ask              │   │
 │  │  metis·caveman   │  │  session.compacting          │   │
-│  └─────────────────┘  │  messages.transform           │   │
+│  └──────────────────┘  │  messages.transform          │   │
 │                        └──────────────────────────────┘   │
-│  ┌─────────────────┐  ┌──────────────────────────────┐   │
+│  ┌──────────────────┐  ┌──────────────────────────────┐   │
 │  │  Services        │  │  Runtime                     │   │
 │  │  KV Store        │  │  Budget Enforcer             │   │
 │  │  Loop Service    │  │  Session Recovery            │   │
@@ -230,13 +230,13 @@ oc-forgecode <command> [options]
 │  │  Background Mgr  │  │  Skill Loader                │   │
 │  │  MCP Registry    │  │  Context Injection           │   │
 │  │  Host Tools (rg) │  │  Search Renderer             │   │
-│  └─────────────────┘  └──────────────────────────────┘   │
-│                                                          │
-│  ┌───────────────────────────────────────────────────┐   │
-│  │  Storage: SQLite (KV + Graph + Telemetry)         │   │
-│  │  ~/.local/share/opencode/forge/                   │   │
-│  └───────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────┘
+│  └──────────────────┘  └──────────────────────────────┘   │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │  Storage: SQLite (KV + Graph + Telemetry)          │   │
+│  │  ~/.local/share/opencode/forge/                    │   │
+│  └────────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
