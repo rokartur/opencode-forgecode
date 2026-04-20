@@ -39,8 +39,20 @@ const TIMEOUT_DEFAULTS_PROVIDERS = [
 	'copilot',
 	'ollama',
 ] as const
-const DEFAULT_REQUEST_TIMEOUT_MS = 600_000 // 10 min
-const DEFAULT_CHUNK_TIMEOUT_MS = 300_000 // 5 min silence between SSE chunks
+// ── Long-session timeouts ──────────────────────────────────────────
+// Very long sessions (multi-hour coding marathons, complex refactors,
+// big loop runs) routinely hit reasoning gaps of 3-5 min on high-effort
+// models (gpt-5.4 high, claude-opus, etc.) and total request durations
+// well beyond 10 min when many tool calls are chained.
+//
+//   request  = total wall-clock for a single LLM round-trip (30 min)
+//   chunk    = max silence between SSE chunks before abort  (10 min)
+//
+// These generous defaults prevent "Tool execution aborted / operation
+// timed out" mid-stream on long sessions. Users can always tighten
+// them via provider.*.options.timeout in opencode.json.
+const DEFAULT_REQUEST_TIMEOUT_MS = 1_800_000 // 30 min (was 10 min)
+const DEFAULT_CHUNK_TIMEOUT_MS = 600_000 // 10 min silence between SSE chunks (was 5 min)
 
 /**
  * Returns true when the value looks like an intentional, positive timeout

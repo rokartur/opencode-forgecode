@@ -252,10 +252,10 @@ describe('createConfigHandler', () => {
 
 			const provider = config.provider as Record<string, { options?: Record<string, unknown> }>
 			expect(provider).toBeDefined()
-			expect(provider.openai?.options?.timeout).toBe(600_000)
-			expect(provider.openai?.options?.chunkTimeout).toBe(300_000)
-			expect(provider.anthropic?.options?.timeout).toBe(600_000)
-			expect(provider.anthropic?.options?.chunkTimeout).toBe(300_000)
+			expect(provider.openai?.options?.timeout).toBe(1_800_000)
+			expect(provider.openai?.options?.chunkTimeout).toBe(600_000)
+			expect(provider.anthropic?.options?.timeout).toBe(1_800_000)
+			expect(provider.anthropic?.options?.chunkTimeout).toBe(600_000)
 		})
 
 		test('user-set provider options with valid positive numbers are NOT overwritten', async () => {
@@ -289,8 +289,8 @@ describe('createConfigHandler', () => {
 			await configHandler(config)
 
 			const provider = config.provider as Record<string, { options?: Record<string, unknown> }>
-			expect(provider.openai?.options?.timeout).toBe(600_000)
-			expect(provider.openai?.options?.chunkTimeout).toBe(300_000)
+			expect(provider.openai?.options?.timeout).toBe(1_800_000)
+			expect(provider.openai?.options?.chunkTimeout).toBe(600_000)
 		})
 
 		test('partial user options are merged: missing timeout key gets default', async () => {
@@ -305,7 +305,7 @@ describe('createConfigHandler', () => {
 
 			const provider = config.provider as Record<string, { options?: Record<string, unknown> }>
 			expect(provider.openai?.options?.chunkTimeout).toBe(99_000)
-			expect(provider.openai?.options?.timeout).toBe(600_000)
+			expect(provider.openai?.options?.timeout).toBe(1_800_000)
 		})
 
 		test('custom providers already in user config also get timeout defaults', async () => {
@@ -320,8 +320,8 @@ describe('createConfigHandler', () => {
 
 			const provider = config.provider as Record<string, { options?: Record<string, unknown> }>
 			expect(provider['my-custom-provider']?.options?.apiKey).toBe('x')
-			expect(provider['my-custom-provider']?.options?.timeout).toBe(600_000)
-			expect(provider['my-custom-provider']?.options?.chunkTimeout).toBe(300_000)
+			expect(provider['my-custom-provider']?.options?.timeout).toBe(1_800_000)
+			expect(provider['my-custom-provider']?.options?.chunkTimeout).toBe(600_000)
 		})
 
 		test('agent.options.timeout default is injected for plugin agents', async () => {
@@ -331,8 +331,8 @@ describe('createConfigHandler', () => {
 			await configHandler(config)
 
 			const agentCfg = config.agent as Record<string, { options?: Record<string, unknown> }>
-			expect(agentCfg.forge?.options?.timeout).toBe(300_000)
-			expect(agentCfg.muse?.options?.timeout).toBe(300_000)
+			expect(agentCfg.forge?.options?.timeout).toBe(600_000)
+			expect(agentCfg.muse?.options?.timeout).toBe(600_000)
 		})
 
 		test('user-set agent.options.timeout with valid positive number is NOT overwritten', async () => {
@@ -362,8 +362,8 @@ describe('createConfigHandler', () => {
 			await configHandler(config)
 
 			const agentCfg = config.agent as Record<string, { options?: Record<string, unknown> }>
-			expect(agentCfg.forge?.options?.timeout).toBe(300_000)
-			expect(agentCfg.muse?.options?.timeout).toBe(300_000)
+			expect(agentCfg.forge?.options?.timeout).toBe(600_000)
+			expect(agentCfg.muse?.options?.timeout).toBe(600_000)
 		})
 	})
 })

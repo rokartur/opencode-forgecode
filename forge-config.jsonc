@@ -13,6 +13,11 @@
 	// Session compaction settings for forgecode's own prompt override/fallback.
 	// Keep OpenCode's native `compaction.auto=true` and `compaction.prune=true`
 	// in `opencode.json`; this block does not replace the root OpenCode setting.
+	//
+	// For very long sessions: customPrompt=true ensures the summary-frame
+	// preserves file paths, decisions, and todo state across compaction.
+	// maxContextTokens=0 means "no plugin-side limit" — we rely on OpenCode's
+	// own `compaction.auto` + `compaction.reserved` to manage the window.
 	"compaction": {
 		"customPrompt": true,
 		"maxContextTokens": 0,
@@ -32,14 +37,17 @@
 	"auditorModel": "",
 
 	// Iterative development loop settings
+	// Long-session tuning: 200 iterations allows multi-hour autonomous loops.
+	// Stall timeout of 10 min accommodates high-effort reasoning models that
+	// go silent for 3-5 min during complex planning/tool-call sequences.
 	"loop": {
 		"enabled": true,
-		"defaultMaxIterations": 15,
+		"defaultMaxIterations": 200,
 		"cleanupWorktree": false,
 		"defaultAudit": true,
 		"model": "",
 		"minAudits": 1,
-		"stallTimeoutMs": 60000,
+		"stallTimeoutMs": 600000,
 		// Worktree loop completion logging (off by default)
 		"worktreeLogging": {
 			"enabled": false,
@@ -67,12 +75,14 @@
 	// Each section's stage is referenced from `plans/master-plan.md`.
 
 	// Background task runtime configuration. Wired in Stage 6a.
+	// Long-session tuning: higher concurrency (8), longer idle timeout (5 min)
+	// so background tasks don't prematurely complete during complex operations.
 	"background": {
 		"enabled": false,
-		"maxConcurrent": 5,
-		"perModelLimit": 2,
-		"pollIntervalMs": 3000,
-		"idleTimeoutMs": 10000,
+		"maxConcurrent": 8,
+		"perModelLimit": 3,
+		"pollIntervalMs": 5000,
+		"idleTimeoutMs": 300000,
 	},
 
 	// Language Server Protocol integration. Wired in Stage 5b.
@@ -147,9 +157,13 @@
 	// doom-loop detection, pending-todo reminders, undo snapshots).
 	// If you also use DCP, leave this enabled so forgecode still owns the final
 	// `experimental.session.compacting` summary-frame step.
+	// Long-session tuning: raised doom-loop threshold to 5 so the agent
+	// gets more retries before being warned (complex refactors often need
+	// 3-4 similar tool calls legitimately). All compaction/truncation stays
+	// enabled — essential for keeping the context window healthy over hours.
 	"harness": {
 		"enabled": true,
-		"doomLoopThreshold": 3,
+		"doomLoopThreshold": 5,
 		"pendingTodosReminder": true,
 		"snapshots": true,
 		"compaction": true,
@@ -166,8 +180,10 @@
 		"showVersion": true,
 	},
 
-	// Default TTL for KV store entries in milliseconds (default: 604800000 / 7 days)
-	"defaultKvTtlMs": 604800000,
+	// Default TTL for KV store entries in milliseconds.
+	// Long-session tuning: 30 days so session memories, tool archives, and
+	// loop state survive across extended multi-day development marathons.
+	"defaultKvTtlMs": 2592000000,
 
 	// Per-agent overrides (temperature range: 0.0 - 2.0)
 	// Keys are agent display names: "forge", "muse", "sage"
@@ -195,23 +211,32 @@
 		},
 	},
 
-	// Delta-read mode — returns diffs on re-reads instead of full file content
+	// Delta-read mode — returns diffs on re-reads instead of full file content.
+	// Long-session tuning: 500 cached files (up from 100) so even large
+	// codebase sessions don't evict delta caches mid-refactor. Larger diff
+	// window (3000 chars) before falling back to full re-read.
 	"deltaRead": {
 		"enabled": true,
-		"maxCachePerSession": 100,
-		"maxDiffChars": 1500,
+		"maxCachePerSession": 500,
+		"maxDiffChars": 3000,
 	},
 
-	// Tool result archiving — large outputs archived to disk, replaced with preview
+	// Tool result archiving — large outputs archived to disk, replaced with preview.
+	// Long-session tuning: raised threshold to 8192 so moderately large outputs
+	// stay inline (reduces expand round-trips), but truly huge outputs still
+	// get archived to protect the context window.
 	"toolArchive": {
 		"enabled": true,
-		"thresholdChars": 4096,
+		"thresholdChars": 8192,
 	},
 
-	// Context quality scoring — 7-signal composite health tracker
+	// Context quality scoring — 7-signal composite health tracker.
+	// Long-session tuning: lowered nudge threshold to 45 so the agent gets
+	// quality warnings earlier, giving it more time to self-correct before
+	// context degrades irreversibly in a long session.
 	"qualityScore": {
 		"enabled": true,
-		"nudgeThreshold": 60,
+		"nudgeThreshold": 45,
 	},
 
 	// Progressive checkpoints — snapshot session state at fill thresholds

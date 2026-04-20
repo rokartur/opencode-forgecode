@@ -10,10 +10,15 @@
  *   - fetch         → cap total characters
  */
 
+// Long-session tuning: generous limits so tool outputs retain enough detail
+// for the model to reason about without excessive expand round-trips.
+// shell:  400+400 prefix/suffix lines (was 200+200), 800-char line cap (was 500)
+// search: 400 lines, 600-char line cap (was 200/400)
+// fetch:  80K chars (was 40K)
 const DEFAULTS = {
-	shell: { prefixLines: 200, suffixLines: 200, maxLineLength: 500 },
-	search: { maxLines: 200, maxLineLength: 400 },
-	fetch: { maxChars: 40_000 },
+	shell: { prefixLines: 400, suffixLines: 400, maxLineLength: 800 },
+	search: { maxLines: 400, maxLineLength: 600 },
+	fetch: { maxChars: 80_000 },
 }
 
 export function truncateShell(content: string, opts: Partial<typeof DEFAULTS.shell> = {}): string {

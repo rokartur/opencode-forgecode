@@ -94,8 +94,10 @@ function estimateTokens(chars: number): number {
 	return Math.ceil(chars / 4)
 }
 
-// Typical context window sizes
-const DEFAULT_MAX_TOKENS = 200_000
+// Long-session tuning: modern models (gpt-5, claude-opus-4, gemini-2.5) have
+// 200K-1M+ context windows.  Setting 500K here means contextFill signals
+// won't trigger prematurely on large sessions that are well within budget.
+const DEFAULT_MAX_TOKENS = 500_000
 
 export class QualityScorer {
 	private readonly sessions = new Map<string, SessionQualityState>()
@@ -237,7 +239,9 @@ export class QualityScorer {
 
 		const threshold = config?.nudgeThreshold ?? 60
 		const cooldown = config?.nudgeCooldownMs ?? 5 * 60 * 1000
-		const maxNudges = config?.maxNudgesPerSession ?? 3
+		// Long-session tuning: allow up to 10 nudges (was 3) so multi-hour
+		// sessions keep getting quality feedback throughout their lifecycle.
+		const maxNudges = config?.maxNudgesPerSession ?? 10
 
 		if (s.suppressNextNudge) {
 			s.suppressNextNudge = false

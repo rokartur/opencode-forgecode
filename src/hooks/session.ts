@@ -41,7 +41,12 @@ function formatEventProperties(props?: Record<string, unknown>): string {
 
 const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
 	customPrompt: true,
-	maxContextTokens: 4000,
+	// Long-session tuning: increased from 4000 to 16000 so the summary-frame
+	// retains more working context (file paths, decisions, todo state) when
+	// compaction fires.  Overridden by forge-config.jsonc `maxContextTokens: 0`
+	// which means "no plugin-side limit" — this default only applies when the
+	// config key is missing entirely.
+	maxContextTokens: 16_000,
 }
 
 export function createSessionHooks(

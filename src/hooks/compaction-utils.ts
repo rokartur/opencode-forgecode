@@ -9,34 +9,49 @@ interface SessionMessage {
 }
 
 export function buildCustomCompactionPrompt(): string {
-	return `You are generating a continuation context for a coding session. Your summary will be the ONLY context after compaction.
-Preserve everything needed for seamless continuation.
+	return `You are generating a continuation context for a very long coding session. Your summary will be the ONLY context after compaction — the agent will have ZERO memory of anything you omit.
+Preserve everything needed for seamless continuation across potentially hours of additional work.
 
 ## CRITICAL - Preserve These Verbatim
 1. The current task/objective (quote the user's original request exactly)
-2. ALL file paths being actively worked on (with what's being done)
-3. Key decisions made and their rationale
-4. Any corrections or gotchas discovered during the session
-5. Todo list state (what's done, in progress, pending)
+2. ALL file paths being actively worked on (with what's being done to each)
+3. Key decisions made and their rationale (WHY, not just WHAT)
+4. Any corrections, gotchas, or edge cases discovered during the session
+5. Todo list state (what's done, in progress, pending — with IDs if available)
+6. User preferences expressed during the session (coding style, naming, etc.)
+7. Error patterns encountered and how they were resolved
+8. External context: API endpoints, schema shapes, library versions mentioned
 
 ## Structure Your Summary As:
 
 ### Active Task
 [Verbatim objective + what was happening when compaction fired]
 
+### Session History (Condensed)
+[Chronological list of major steps completed, 1-2 lines each]
+
 ### Key Context
-[Decisions, constraints, user preferences, corrections]
+[Decisions, constraints, user preferences, corrections, discovered patterns]
 
 ### Active Files
-[filepath -> what's being done to it]
+[filepath -> what's being done to it, current state]
+
+### Errors & Resolutions
+[Any error patterns and how they were fixed — prevents re-discovery]
+
+### External Dependencies
+[API schemas, library versions, endpoint URLs, auth patterns]
 
 ### Next Steps
-[What should happen immediately after compaction]
+[What should happen immediately after compaction, in priority order]
 
 ## Rules
-- Use specific file paths.
+- Use specific file paths, line numbers where available
 - State what tools returned, not just that they were called
-- Prefer completeness over brevity - this is the agent's entire working memory`
+- Prefer completeness over brevity — this is the agent's ENTIRE working memory
+- If a file was modified, note WHAT changed (not just "was edited")
+- Preserve enough context that another agent could continue the work cold
+- Include any test commands, build commands, or verification steps that were used`
 }
 
 export function formatCompactionDiagnostics(stats: {

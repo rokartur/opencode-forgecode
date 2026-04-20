@@ -217,9 +217,7 @@ export class BackgroundSpawner {
 							parts: Array<{ type: string; text?: string }>
 						}>
 
-						const lastAssistant = messages
-							.filter(m => m.info.role === 'assistant')
-							.pop()
+						const lastAssistant = messages.filter(m => m.info.role === 'assistant').pop()
 
 						const summary = lastAssistant
 							? lastAssistant.parts
@@ -249,9 +247,7 @@ export class BackgroundSpawner {
 					}>
 
 					const lastMsg = messages[messages.length - 1]
-					const outputHash = lastMsg
-						? `${messages.length}:${JSON.stringify(lastMsg.parts).length}`
-						: ''
+					const outputHash = lastMsg ? `${messages.length}:${JSON.stringify(lastMsg.parts).length}` : ''
 
 					const prev = this.lastOutputHash.get(task.id)
 					if (prev && prev.hash === outputHash) {

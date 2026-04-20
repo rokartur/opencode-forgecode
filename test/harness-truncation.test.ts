@@ -67,7 +67,8 @@ describe('truncateFetch', () => {
 
 describe('truncateForTool', () => {
 	test('bash routes to truncateShell', () => {
-		const lines = Array.from({ length: 500 }, (_, i) => `l${i}`).join('\n')
+		// 1000 lines exceeds the default prefixLines(400) + suffixLines(400) = 800
+		const lines = Array.from({ length: 1000 }, (_, i) => `l${i}`).join('\n')
 		const result = truncateForTool('bash', lines)
 		expect(result).toContain('lines hidden')
 	})
@@ -79,7 +80,8 @@ describe('truncateForTool', () => {
 	})
 
 	test('webfetch routes to truncateFetch', () => {
-		const s = 'y'.repeat(50_000)
+		// 100K chars exceeds the default maxChars(80_000)
+		const s = 'y'.repeat(100_000)
 		const result = truncateForTool('webfetch', s)
 		expect(result).toContain('chars truncated')
 	})

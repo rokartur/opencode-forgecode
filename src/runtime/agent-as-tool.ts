@@ -143,9 +143,7 @@ function createAgentTool(
 					}
 
 					sessionId = createResult.data.id
-					logger.log(
-						`[agent-as-tool] new child session=${sessionId} parent=${parentSessionID} agent=${role}`,
-					)
+					logger.log(`[agent-as-tool] new child session=${sessionId} parent=${parentSessionID} agent=${role}`)
 				}
 
 				// Build the prompt — context only on first message
@@ -167,7 +165,10 @@ function createAgentTool(
 				}
 
 				// Extract text from the response parts
-				const data = promptResult.data as { info: Record<string, unknown>; parts: Array<{ type: string; text?: string }> } | null
+				const data = promptResult.data as {
+					info: Record<string, unknown>
+					parts: Array<{ type: string; text?: string }>
+				} | null
 				if (!data) {
 					return (
 						`agent_${role} returned no response.\n\n` +

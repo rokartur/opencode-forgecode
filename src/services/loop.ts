@@ -33,7 +33,10 @@ export function migrateRalphKeys(kvService: KvService, projectId: string, logger
 }
 
 export const MAX_RETRIES = 3
-export const STALL_TIMEOUT_MS = 60_000
+// Long-session default: 10 min stall timeout (matches forge-config.jsonc).
+// High-effort reasoning models (gpt-5.4 high, claude-opus) can go silent for
+// 3-5 min during complex planning; previous 60s caused premature stall kills.
+export const STALL_TIMEOUT_MS = 600_000
 export const MAX_CONSECUTIVE_STALLS = 5
 export const DEFAULT_MIN_AUDITS = 1
 export const RECENT_MESSAGES_COUNT = 5
