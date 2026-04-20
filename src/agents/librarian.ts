@@ -8,7 +8,7 @@ export const librarianAgent: AgentDefinition = {
 	description:
 		'Research-only agent — finds information in the codebase using read-only tools. Returns structured findings.',
 	mode: 'subagent',
-	hidden: true,
+	hidden: false,
 	temperature: 0.0,
 	toolSupported: true,
 	tools: {

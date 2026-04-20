@@ -367,6 +367,12 @@ function createAgentConfigs(agents: Record<AgentRole, AgentDefinition>): Record<
 
 	for (const agent of Object.values(agents)) {
 		const tools: Record<string, boolean> = {}
+		if (agent.tools?.include) {
+			// Whitelist mode: explicitly enable only listed tools
+			for (const tool of agent.tools.include) {
+				tools[tool] = true
+			}
+		}
 		if (agent.tools?.exclude) {
 			for (const tool of agent.tools.exclude) {
 				tools[tool] = false

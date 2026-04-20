@@ -137,7 +137,8 @@ export function createBackgroundTools(
 		return {
 			bg_spawn: tool({
 				description:
-					'Spawn a background agent task using the lightweight session-backed runtime. ' +
+					'Compatibility background agent launcher using the lightweight session-backed runtime. ' +
+					'Prefer native Task/subtask child sessions when you want OpenCode-visible subagent runs and browsable output. ' +
 					'Returns a task_id and session_id that can be monitored with bg_status / bg_wait.',
 				args: {
 					agent: z
@@ -336,7 +337,7 @@ export function createBackgroundTools(
 	return {
 		bg_spawn: tool({
 			description:
-				'Spawn a background agent task. The agent runs in a separate session and can be monitored, continued, or cancelled.\n\n' +
+				'Compatibility background agent launcher. Prefer native Task/subtask child sessions when you want OpenCode-visible subagent runs and browsable output. The agent runs in a separate session and can be monitored, continued, or cancelled.\n\n' +
 				'Returns a task_id and session_id. Use session_id with bg_continue to send follow-up messages.',
 			args: {
 				agent: z

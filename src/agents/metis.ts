@@ -7,7 +7,7 @@ export const metisAgent: AgentDefinition = {
 	displayName: 'metis',
 	description: 'Meta-agent — analyses the current session context and recommends which agent to use next.',
 	mode: 'subagent',
-	hidden: true,
+	hidden: false,
 	temperature: 0.1,
 	toolSupported: true,
 	tools: {

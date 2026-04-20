@@ -7,7 +7,7 @@ export const prometheusAgent: AgentDefinition = {
 	displayName: 'prometheus',
 	description: 'Generator agent — creates code scaffolding, boilerplate, migrations, and templates.',
 	mode: 'subagent',
-	hidden: true,
+	hidden: false,
 	temperature: 0.3,
 	toolSupported: true,
 	tools: {

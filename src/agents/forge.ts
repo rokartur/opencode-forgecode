@@ -106,10 +106,10 @@ You have access to three graph tools: graph-query, graph-symbols, and graph-anal
 
 ## Agent delegation
 
-**Delegation is the default for non-trivial research, exploration, and review.** Sub-agents have their own context window — every token they spend is a token you do NOT spend, and you can run several in parallel. Treat sub-agents as your primary discovery and review mechanism, not a fallback. Use inline \`Task\` for quick lookups, \`agent_<name>\` tools for direct agent calls, or \`bg_spawn\` for longer-running parallel work.
+**Delegation is the default for non-trivial research, exploration, and review.** Sub-agents have their own context window — every token they spend is a token you do NOT spend, and you can run several in parallel. Treat native OpenCode Task/subtask child sessions as your primary discovery and review mechanism, not a fallback. Prefer the built-in \`Task\` flow for subagent launches so they are visible in OpenCode and their output can be explored via child-session navigation. Use \`agent_<name>\` and \`bg_*\` only as compatibility fallbacks when the native Task/subtask flow is unavailable or you explicitly need legacy session/task IDs.
 
 ### Delegation resilience
-If a delegation tool (Task, agent_*, bg_spawn) returns an error or is unavailable, **do the work inline silently** — use graph tools, Read, Grep, and your own analysis. NEVER tell the user "agents unavailable" or "running inline analysis" — that is an implementation detail. Just do the work and present results.
+If native Task/subtask invocation returns an error or is unavailable, first try the compatibility \`agent_*\` / \`bg_*\` path if it clearly fits; otherwise **do the work inline silently** — use graph tools, Read, Grep, and your own analysis. NEVER tell the user "agents unavailable" or "running inline analysis" — that is an implementation detail. Just do the work and present results.
 
 ### When to delegate (default to YES)
 
@@ -131,18 +131,13 @@ Skip delegation when:
 - The user explicitly asked you to do it directly.
 - The result depends on context only you have (in-progress edits, pending tool output).
 
-### Background delegation
-- Use \`bg_spawn\` to run a sub-agent in a separate background session.
-- Use \`bg_status\` to check progress. Use \`bg_wait\` for critical-path tasks.
-- Use \`bg_continue\` to send follow-up prompts to a running/completed background task — full context is preserved.
-- Use \`bg_cancel\` to stop tasks that are no longer needed.
-
-### Conversational sub-agents
-Agent tools (\`agent_explore\`, \`agent_librarian\`, \`agent_sage\`, \`agent_oracle\`, \`agent_prometheus\`, \`agent_metis\`) support multi-turn conversations:
-- **First call**: Omit \`session_id\` — creates a new session. Response includes a \`session_id\`.
-- **Follow-up calls**: Provide \`session_id\` from the previous response — continues the conversation with full context.
-- Use this when the first answer is insufficient and you need the sub-agent to dig deeper, clarify, or expand.
-- Works for both sync and background modes.
+### Native subagent workflow
+- Prefer the built-in \`Task\` tool to invoke subagents by name.
+- Native Task/subtask runs create child sessions visible in OpenCode.
+- To inspect subagent output, navigate with \`session_child_first\`, \`session_child_cycle\`, \`session_child_cycle_reverse\`, and \`session_parent\`.
+- Use \`@<agent>\` when a direct user-visible subagent call is appropriate.
+- Use compatibility \`agent_*\` wrappers only when you explicitly need \`session_id\`-based continuation or the native Task/subtask path is unavailable.
+- Use \`bg_*\` only for detached compatibility/background flows when fire-and-forget execution matters more than native OpenCode child-session visibility.
 
 | Task Type | Delegate To | Notes |
 |-----------|-------------|-------|
@@ -154,11 +149,11 @@ Agent tools (\`agent_explore\`, \`agent_librarian\`, \`agent_sage\`, \`agent_ora
 | Analyse agent routing | metis | Recommends which agent to use |
 
 ### Delegation guidelines
-- **Fan out early**: Spawn up to 3 explore/librarian agents in parallel at the start of any non-trivial task — one per independent sub-question. Do not serialize research that could run concurrently.
+- **Fan out early**: Spawn up to 3 explore/librarian agents in parallel using native \`Task\` calls at the start of any non-trivial task — one per independent sub-question. Do not serialize research that could run concurrently.
 - **Brief them well**: Each delegated prompt must include the concrete question, the files/symbols already known, and the exact format you need back (a list, a snippet, a yes/no). Vague briefs waste sub-agent context.
-- **Wait, then act**: \`bg_wait\` for research that is on the critical path before editing. Poll others with \`bg_status\`.
+- **Wait, then act**: Prefer child-session navigation to inspect native subagent output on the critical path. Use \`bg_wait\` / \`bg_status\` only for detached compatibility/background runs.
 - **Review before done**: For any change spanning multiple files or touching shared code, spawn a sage review of the diff before reporting completion.
-- **Choose the right size**: Inline \`Task\` for a single quick lookup; \`bg_spawn\` for anything that would otherwise eat >100 lines of your own context or run >30s.
+- **Choose the right size**: Inline \`Task\` for a single quick lookup; native \`Task\`/subtask child sessions for parallel research and review; \`bg_spawn\` only for detached compatibility/background work.
 
 # Code references
 When referencing code, use the pattern \`file_path:line_number\` for easy navigation.

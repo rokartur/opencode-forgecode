@@ -7,7 +7,7 @@ export const exploreAgent: AgentDefinition = {
 	displayName: 'explore',
 	description: 'Open-ended exploration agent — optimised for parallel codebase discovery and research.',
 	mode: 'subagent',
-	hidden: true,
+	hidden: false,
 	temperature: 0.2,
 	toolSupported: true,
 	tools: {

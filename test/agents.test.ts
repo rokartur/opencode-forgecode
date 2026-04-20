@@ -27,6 +27,14 @@ describe('Agent definitions', () => {
 			expect(sageAgent.temperature).toBe(0.0)
 		})
 
+		test('plugin subagents are visible for native OpenCode invocation', async () => {
+			const { agents } = await import('../src/agents')
+			for (const name of ['explore', 'librarian', 'oracle', 'prometheus', 'metis'] as const) {
+				expect(agents[name].mode).toBe('subagent')
+				expect(agents[name].hidden).not.toBe(true)
+			}
+		})
+
 		test('sage agent has expected tool exclusions', () => {
 			expect(sageAgent.tools?.exclude).toBeDefined()
 			expect(sageAgent.tools?.exclude).toContain('plan-execute')

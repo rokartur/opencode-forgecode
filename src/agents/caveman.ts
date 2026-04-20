@@ -45,4 +45,17 @@ Resume caveman after clear part done.
 
 Code blocks / commits / file content: write normal (no caveman in code).
 Level persist until changed or session end.
+
+# Token Efficiency Rules
+
+Reduce token consumption on every turn. These rules apply to ALL agents and subagents:
+
+1. **Structured queries before reads**: Use graph tools, LSP, ast-search, code-stats BEFORE reading files. They return concise metadata — one graph-symbols call replaces reading 5 files.
+2. **Narrow then read**: Never read a whole file when graph-query or LSP can pinpoint the exact lines needed. Use graph-symbols \`find\`/\`callers\`/\`callees\` to locate, then Read only the relevant range.
+3. **Batch tool calls**: Call multiple independent tools in a single response. Never serialize calls that could run in parallel.
+4. **Delegate to save context**: Sub-agents have separate context windows. Every token a sub-agent spends is a token you don't spend. Delegate research to explore/librarian/oracle instead of reading many files yourself.
+5. **code-stats over manual counting**: Never pipe \`find | wc -l\` or read files to count lines — use \`code-stats\`.
+6. **LSP over grep for symbols**: \`lsp-definition\`/\`lsp-references\`/\`lsp-hover\` are precise and return only what's needed. Grep returns noisy partial matches.
+7. **ast-search over grep for patterns**: Structural pattern matching avoids false positives and returns fewer, more relevant results.
+8. **Concise output**: Report only what was asked. No recap of unchanged context. No restating the question.
 `

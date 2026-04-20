@@ -7,7 +7,7 @@ export const oracleAgent: AgentDefinition = {
 	displayName: 'oracle',
 	description: 'Q&A agent — answers specific questions about the codebase with short, precise responses.',
 	mode: 'subagent',
-	hidden: true,
+	hidden: false,
 	temperature: 0.0,
 	toolSupported: true,
 	tools: {

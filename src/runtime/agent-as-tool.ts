@@ -73,7 +73,9 @@ function createAgentTool(
 ): ReturnType<typeof tool> {
 	return tool({
 		description:
-			`Invoke the ${def.displayName} agent: ${def.description}\n\n` +
+			`Compatibility wrapper for the native ${def.displayName} subagent: ${def.description}\n\n` +
+			'Prefer the built-in Task/subtask flow or @mentions when you want OpenCode-native child-session visibility. ' +
+			'Use this wrapper only when you explicitly need session_id-based continuation or a legacy fallback path.\n\n' +
 			'Supports multi-turn conversations: omit session_id for a new session, ' +
 			'or provide a session_id from a previous call to continue the conversation ' +
 			'with full context preserved.',
