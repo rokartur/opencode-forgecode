@@ -85,39 +85,20 @@ export function isRtkInstalled(): boolean {
 	return getCachedRtkPath() !== null
 }
 
-/** Short instruction snippet injected into agent sessions. */
-export const RTK_INSTRUCTION_BLOCK = `# RTK - Rust Token Killer
-
-**Usage**: Token-optimized CLI proxy for shell commands.
-
-## Rule
-
-Always prefix shell commands with \`rtk\`.
-
-Examples:
-
-\`\`\`bash
-rtk git status
-rtk cargo test
-rtk npm run build
-rtk pytest -q
-\`\`\`
-
-## Meta Commands
-
-\`\`\`bash
-rtk gain            # Token savings analytics
-rtk gain --history  # Recent command savings history
-rtk proxy <cmd>     # Run raw command without filtering
-\`\`\`
-
-## Verification
-
-\`\`\`bash
-rtk --version
-rtk gain
-which rtk
-\`\`\`
+/**
+ * Short instruction snippet injected into agent sessions.
+ *
+ * IMPORTANT: Wrapped in <system-reminder> tags so the model treats it as a
+ * tool-use directive and NOT as project content to analyse. Without this
+ * framing the model would summarise / analyse RTK itself when the user
+ * asks for a project analysis.
+ */
+export const RTK_INSTRUCTION_BLOCK = `<system-reminder>
+[Shell tool directive — this is NOT part of the user's project. Do not analyse, summarise, or reference RTK in project descriptions.]
+Always prefix shell commands with \`rtk\` (token-optimized CLI proxy).
+Examples: \`rtk git status\`, \`rtk cargo test\`, \`rtk npm run build\`, \`rtk pytest -q\`.
+Use \`rtk proxy <cmd>\` to bypass filtering. Use \`rtk gain\` for token-savings stats.
+</system-reminder>
 `
 
 /**
@@ -136,49 +117,13 @@ export function buildRtkInstructionBlock(): string {
 
 	// Not on PATH — prepend a setup preamble with the discovered directory.
 	const rtkDir = rtkPath.replace(/\/rtk$/, '')
-	return `# RTK - Rust Token Killer
-
-**Usage**: Token-optimized CLI proxy for shell commands.
-
-## IMPORTANT — PATH setup
-
-\`rtk\` is installed at \`${rtkPath}\` but may not be on the shell PATH.
-Before using rtk, run this **once per shell session**:
-
-\`\`\`bash
-export PATH="${rtkDir}:$PATH"
-\`\`\`
-
-Alternatively, use the full path directly: \`${rtkPath}\`.
-
-## Rule
-
-Always prefix shell commands with \`rtk\` (or \`${rtkPath}\` if not on PATH).
-
-Examples:
-
-\`\`\`bash
-rtk git status
-rtk cargo test
-rtk npm run build
-rtk pytest -q
-\`\`\`
-
-## Meta Commands
-
-\`\`\`bash
-rtk gain            # Token savings analytics
-rtk gain --history  # Recent command savings history
-rtk proxy <cmd>     # Run raw command without filtering
-\`\`\`
-
-## Verification
-
-\`\`\`bash
-rtk --version
-rtk gain
-which rtk
-\`\`\`
+	return `<system-reminder>
+[Shell tool directive — this is NOT part of the user's project. Do not analyse, summarise, or reference RTK in project descriptions.]
+\`rtk\` is installed at \`${rtkPath}\` but may not be on PATH. Run once per shell: \`export PATH="${rtkDir}:$PATH"\`
+Always prefix shell commands with \`rtk\` (or use full path \`${rtkPath}\`).
+Examples: \`rtk git status\`, \`rtk cargo test\`, \`rtk npm run build\`, \`rtk pytest -q\`.
+Use \`rtk proxy <cmd>\` to bypass filtering. Use \`rtk gain\` for token-savings stats.
+</system-reminder>
 `
 }
 

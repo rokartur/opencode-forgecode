@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'bun:test'
-import { resolveRtkConfig, RTK_INSTRUCTION_BLOCK, buildRtkInstructionBlock, isRtkInstalled, ensureRtkInstalled, resolveRtkPath, invalidateRtkPathCache } from '../src/runtime/rtk'
+import {
+	resolveRtkConfig,
+	RTK_INSTRUCTION_BLOCK,
+	buildRtkInstructionBlock,
+	isRtkInstalled,
+	ensureRtkInstalled,
+	resolveRtkPath,
+	invalidateRtkPathCache,
+} from '../src/runtime/rtk'
 import { createRtkGuidanceHooks } from '../src/hooks/rtk-guidance'
 import type { Logger } from '../src/types'
 
@@ -31,12 +39,16 @@ describe('resolveRtkConfig', () => {
 })
 
 describe('RTK_INSTRUCTION_BLOCK', () => {
+	it('is wrapped in system-reminder tags so the model treats it as a directive', () => {
+		expect(RTK_INSTRUCTION_BLOCK).toContain('<system-reminder>')
+		expect(RTK_INSTRUCTION_BLOCK).toContain('</system-reminder>')
+		expect(RTK_INSTRUCTION_BLOCK).toContain("NOT part of the user's project")
+	})
+
 	it('contains the core rule and meta commands', () => {
-		expect(RTK_INSTRUCTION_BLOCK).toContain('RTK - Rust Token Killer')
 		expect(RTK_INSTRUCTION_BLOCK).toContain('Always prefix shell commands with `rtk`')
 		expect(RTK_INSTRUCTION_BLOCK).toContain('rtk gain')
 		expect(RTK_INSTRUCTION_BLOCK).toContain('rtk proxy <cmd>')
-		expect(RTK_INSTRUCTION_BLOCK).toContain('rtk --version')
 	})
 })
 
@@ -51,11 +63,17 @@ describe('resolveRtkPath', () => {
 })
 
 describe('buildRtkInstructionBlock', () => {
+	it('is wrapped in system-reminder tags', () => {
+		const block = buildRtkInstructionBlock()
+		expect(block).toContain('<system-reminder>')
+		expect(block).toContain('</system-reminder>')
+	})
+
 	it('contains the core RTK instruction content', () => {
 		const block = buildRtkInstructionBlock()
-		expect(block).toContain('RTK - Rust Token Killer')
 		expect(block).toContain('rtk gain')
 		expect(block).toContain('rtk proxy <cmd>')
+		expect(block).toContain("NOT part of the user's project")
 	})
 })
 
@@ -147,7 +165,7 @@ describe('createRtkGuidanceHooks', () => {
 		const output: { parts: Array<Record<string, unknown>> } = { parts: [] }
 		hooks.onMessage({ sessionID: 's2', agent: 'forge' }, output)
 		expect(output.parts.length).toBe(1)
-		expect((output.parts[0] as { text: string }).text).toContain('RTK - Rust Token Killer')
+		expect((output.parts[0] as { text: string }).text).toContain('<system-reminder>')
 		// second call for the same session+agent is a no-op
 		hooks.onMessage({ sessionID: 's2', agent: 'forge' }, output)
 		expect(output.parts.length).toBe(1)

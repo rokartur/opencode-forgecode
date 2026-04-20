@@ -172,7 +172,16 @@ export function createAstTools(ctx: ToolContext): Record<string, ReturnType<type
 
 				if (!args.apply) {
 					// Dry run mode — JSON output shows what would change
-					const sgArgs = ['run', '--pattern', args.pattern, '--rewrite', args.rewrite, '--lang', args.lang, '--json']
+					const sgArgs = [
+						'run',
+						'--pattern',
+						args.pattern,
+						'--rewrite',
+						args.rewrite,
+						'--lang',
+						args.lang,
+						'--json',
+					]
 					if (args.path) sgArgs.push(args.path)
 
 					const result = runSg(sgArgs, directory)
@@ -204,7 +213,16 @@ export function createAstTools(ctx: ToolContext): Record<string, ReturnType<type
 				}
 
 				// Apply mode: first dry-run to get affected files/counts, then apply
-				const dryArgs = ['run', '--pattern', args.pattern, '--rewrite', args.rewrite, '--lang', args.lang, '--json']
+				const dryArgs = [
+					'run',
+					'--pattern',
+					args.pattern,
+					'--rewrite',
+					args.rewrite,
+					'--lang',
+					args.lang,
+					'--json',
+				]
 				if (args.path) dryArgs.push(args.path)
 				const dryResult = runSg(dryArgs, directory)
 
@@ -220,7 +238,10 @@ export function createAstTools(ctx: ToolContext): Record<string, ReturnType<type
 						}>
 						if (matches.length === 0) return 'No matches found for the pattern.'
 						for (const m of matches) affectedFiles.add(m.file)
-						const fileList = [...affectedFiles].slice(0, 15).map(f => `  - ${f}`).join('\n')
+						const fileList = [...affectedFiles]
+							.slice(0, 15)
+							.map(f => `  - ${f}`)
+							.join('\n')
 						matchSummary = `${matches.length} match(es) in ${affectedFiles.size} file(s):\n${fileList}`
 						if (affectedFiles.size > 15) matchSummary += `\n  ... and ${affectedFiles.size - 15} more files`
 					} catch {
@@ -228,7 +249,16 @@ export function createAstTools(ctx: ToolContext): Record<string, ReturnType<type
 					}
 				}
 
-				const applyArgs = ['run', '--pattern', args.pattern, '--rewrite', args.rewrite, '--lang', args.lang, '--update-all']
+				const applyArgs = [
+					'run',
+					'--pattern',
+					args.pattern,
+					'--rewrite',
+					args.rewrite,
+					'--lang',
+					args.lang,
+					'--update-all',
+				]
 				if (args.path) applyArgs.push(args.path)
 				const applyResult = runSg(applyArgs, directory)
 
