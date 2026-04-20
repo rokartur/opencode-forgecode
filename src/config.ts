@@ -333,6 +333,12 @@ export function createConfigHandler(
 						(config.provider as Record<string, { options?: Record<string, unknown> }>) ?? {},
 					).map(([k, v]) => [k, v?.options ?? null]),
 				),
+				agentModels: Object.fromEntries(
+					Object.entries(mergedAgents).map(([k, v]) => {
+						const a = v as unknown as { model?: string; hidden?: boolean; mode?: string }
+						return [k, { model: a.model ?? '(none)', hidden: !!a.hidden, mode: a.mode ?? '?' }]
+					}),
+				),
 				agentTimeouts: Object.fromEntries(
 					Object.entries(mergedAgents).map(([k, v]) => {
 						const opts = (v as unknown as { options?: Record<string, unknown> }).options

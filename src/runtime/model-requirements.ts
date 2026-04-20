@@ -157,8 +157,8 @@ export const AGENT_CHAINS: Record<string, AgentChain> = {
 		rationale: 'Fast codebase grep — speed is everything. Do NOT upgrade to Opus.',
 		chain: [
 			{ providers: ['github-copilot', 'xai'], model: 'grok-code-fast-1' },
-			{ providers: ['opencode-go'], model: 'minimax-m2.7-highspeed' },
-			{ providers: ['opencode'], model: 'minimax-m2.7' },
+			{ providers: ['opencode-go'], model: 'minimax-m2.7' },
+			{ providers: ['opencode'], model: 'minimax-m2.7-highspeed' },
 			{ providers: ['anthropic', 'github-copilot', 'opencode'], model: 'claude-haiku-4-5' },
 			{ providers: ['opencode'], model: 'gpt-5.4-mini' },
 			{ providers: ['google', 'github-copilot', 'opencode'], model: 'gemini-3.1-flash-lite-preview' },

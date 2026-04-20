@@ -84,6 +84,7 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 			debug: loggingConfig?.debug ?? false,
 		})
 		logger.log(`Initializing plugin for directory: ${directory}, projectId: ${projectId}`)
+		logger.log(`[diag] serverUrl raw=${input.serverUrl.toString()} clean=${cleanUrl.toString()} protocol=${cleanUrl.protocol} hostname=${cleanUrl.hostname} port=${cleanUrl.port}`)
 		logUnsupportedConfigIssues(logger, config)
 		const caps = getCapabilityDescriptors()
 		const active = caps.filter(c => c.status === 'implemented').length
@@ -299,42 +300,54 @@ export function createForgePlugin(config: PluginConfig): Plugin {
 		let bgManager: BackgroundManager | null = null
 		let bgConcurrency: ConcurrencyManager | null = null
 		let bgSpawner: BackgroundSpawner | null = null
-		if (config.background?.enabled && db) {
+		if (db) {
 			try {
+				const backgroundConfig = config.background ?? {
+					enabled: false,
+					maxConcurrent: 4,
+					perModelLimit: 2,
+					pollIntervalMs: 5000,
+					idleTimeoutMs: 120000,
+				}
 				bgManager = new BackgroundManager(db)
 				bgConcurrency = new ConcurrencyManager(bgManager, {
-					maxConcurrent: config.background.maxConcurrent,
-					perModelLimit: config.background.perModelLimit,
+					maxConcurrent: backgroundConfig.maxConcurrent,
+					perModelLimit: backgroundConfig.perModelLimit,
 				})
-				bgSpawner = new BackgroundSpawner(
-					v2,
-					bgManager,
-					bgConcurrency,
-					directory,
-					{ log: (msg: unknown, ...rest: unknown[]) => logger.log(String(msg), ...rest) },
-					{
-						pollIntervalMs: config.background.pollIntervalMs,
-						idleTimeoutMs: config.background.idleTimeoutMs,
-						onTaskEvent: ({ type, task }) => {
-							// Emit a TUI toast so the user sees when a background task
-							// finishes without having to poll the sidebar.
-							const variant = type === 'completed' ? 'success' : type === 'error' ? 'error' : 'info'
-							const verb = type === 'completed' ? 'completed' : type === 'error' ? 'failed' : 'cancelled'
-							const title = `Background ${verb}`
-							const message = `${task.targetAgent}: ${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '…' : ''}`
-							v2.tui
-								.showToast({
-									directory,
-									title,
-									message,
-									variant,
-									duration: 5000,
-								})
-								.catch(err => logger.debug('[background] toast failed', err))
+
+				if (backgroundConfig.enabled) {
+					bgSpawner = new BackgroundSpawner(
+						v2,
+						bgManager,
+						bgConcurrency,
+						directory,
+						{ log: (msg: unknown, ...rest: unknown[]) => logger.log(String(msg), ...rest) },
+						{
+							pollIntervalMs: backgroundConfig.pollIntervalMs,
+							idleTimeoutMs: backgroundConfig.idleTimeoutMs,
+							onTaskEvent: ({ type, task }) => {
+								// Emit a TUI toast so the user sees when a background task
+								// finishes without having to poll the sidebar.
+								const variant = type === 'completed' ? 'success' : type === 'error' ? 'error' : 'info'
+								const verb = type === 'completed' ? 'completed' : type === 'error' ? 'failed' : 'cancelled'
+								const title = `Background ${verb}`
+								const message = `${task.targetAgent}: ${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '…' : ''}`
+								v2.tui
+									.showToast({
+										directory,
+										title,
+										message,
+										variant,
+										duration: 5000,
+									})
+									.catch(err => logger.debug('[background] toast failed', err))
+							},
 						},
-					},
-				)
-				logger.log('[background] Runtime initialized')
+					)
+					logger.log('[background] Runtime initialized')
+				} else {
+					logger.log('[background] Lite runtime initialized (session-backed bg_* tools; spawner disabled)')
+				}
 			} catch (err) {
 				logger.error('Failed to initialize background runtime', err)
 				bgManager = null

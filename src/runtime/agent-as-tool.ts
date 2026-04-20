@@ -7,31 +7,36 @@
  *   - Follow-up calls (with session_id): continues the conversation in the
  *     same session, preserving full context.
  *
- * Uses the official OpenCode v2 SDK APIs:
- *   - session.create({ parentID }) for child session hierarchy
- *   - session.prompt() (sync) for blocking agent calls — returns { info, parts } directly
- *   - session.promptAsync() for background fire-and-forget
- *   - session.messages() for fetching message history (continuation mode)
- *   - session.status() for checking idle/busy state
+ * Uses the framework-provided v1 SDK client (`input.client`) for all session
+ * operations.  This client is instantiated by the plugin runtime with the
+ * correct internal URL, so it works even when no external HTTP server is
+ * running (TUI mode).
+ *
+ * API surface used:
+ *   - session.create({ body: { parentID }, query: { directory } })
+ *   - session.promptAsync({ path: { id }, body: { ... }, query: { directory } })
+ *   - session.messages({ path: { id }, query: { directory, limit } })
+ *   - session.status({ query: { directory } })
  *
  * @see https://opencode.ai/docs/sdk
  * @see https://opencode.ai/docs/agents
  */
 
-import { tool } from '@opencode-ai/plugin'
+import { tool, type PluginInput } from '@opencode-ai/plugin'
 import { agents, type AgentDefinition } from '../agents'
 import type { ToolContext } from '../tools/types'
 import type { BackgroundSpawner } from '../runtime/background/spawner'
 import {
-	parseModelString,
 	resolveFallbackModelEntries,
-	retryWithModelFallback,
 } from '../utils/model-fallback'
 
 const z = tool.schema
 
 /** Max chars to return from agent output. */
 const MAX_OUTPUT_CHARS = 8_000
+
+/** Convenience alias for the framework-provided SDK client type. */
+type SdkClient = PluginInput['client']
 
 /**
  * Create agent-as-tool entries for all agents that declare `toolSupported: true`.
@@ -46,13 +51,13 @@ export function createAgentAsTools(
 		tools[`agent_${role}`] = createAgentTool(role, def, ctx)
 	}
 
+	const names = Object.keys(tools)
+	ctx.logger.log(`[agent-as-tool] registered ${names.length} agent tools: ${names.join(', ')}`)
 	return tools
 }
 
 /**
  * Extract text content from message parts using the OpenCode SDK format.
- * Messages use `{ info: Message, parts: Part[] }` where Part has `.type` and `.text`.
- * @see https://opencode.ai/docs/sdk — SessionMessagesResponse / SessionPromptResponse
  */
 function extractPartsText(parts: Array<{ type: string; text?: string }>): string {
 	return parts
@@ -89,16 +94,20 @@ function createAgentTool(
 				.describe('Run in background (true) or wait for result (false)'),
 		},
 		execute: async (args, toolCtx) => {
-			const { bgSpawner, v2, directory, logger } = ctx
+			const { bgSpawner, directory, logger } = ctx
+			const client: SdkClient = ctx.input.client
 			const parentSessionID = toolCtx.sessionID
 
-			// ── Background delegation ──────────────────────────────────
+			logger.log(
+				`[agent-as-tool] ENTER agent_${role} background=${args.background} session_id=${args.session_id ?? '(new)'} bgSpawner=${!!bgSpawner}`,
+			)
+
+			// ── Background delegation (full bgSpawner) ────────────────
 			if (args.background && bgSpawner) {
 				if (args.session_id) {
-					return continueBackgroundSession(v2, directory, role, args)
+					return continueBackgroundSession(client, directory, role, args)
 				}
 
-				// Resolve the agent's model for concurrency accounting and prompt
 				const bgAgentOverride = ctx.config.agents?.[role]
 				const bgModelStr = bgAgentOverride?.model || role
 
@@ -123,97 +132,177 @@ function createAgentTool(
 				)
 			}
 
-			// ── Sync delegation ────────────────────────────────────────
+			// ── Lightweight background via promptAsync (bgSpawner disabled) ─
+			if (args.background && !bgSpawner) {
+				try {
+					const bgCreateResult = await client.session.create({
+						body: {
+							parentID: parentSessionID,
+							title: `agent_${role}: ${args.prompt.slice(0, 60)}`,
+						},
+						query: { directory },
+					})
+					if (bgCreateResult.error || !bgCreateResult.data) {
+						logger.log(`[agent-as-tool] bg-lite session create failed: ${JSON.stringify(bgCreateResult.error)}`)
+						return `agent_${role} background failed: could not create session`
+					}
+					const bgSessionId = (bgCreateResult.data as { id: string }).id
+					const bgFullPrompt =
+						args.context ? `${args.context}\n\n---\n\n${args.prompt}` : args.prompt
+
+					// Fire-and-forget — promptAsync returns 204 regardless of model
+					// validity, so retryWithModelFallback is useless here. Just send
+					// the prompt and let the agent's configured model handle it.
+					const bgPromptResult = await client.session.promptAsync({
+						path: { id: bgSessionId },
+						body: {
+							agent: role,
+							parts: [{ type: 'text' as const, text: bgFullPrompt }],
+						},
+						query: { directory },
+					})
+
+					if (bgPromptResult.error) {
+						logger.log(`[agent-as-tool] bg-lite prompt failed: ${JSON.stringify(bgPromptResult.error)}`)
+						return `agent_${role} background failed: ${JSON.stringify(bgPromptResult.error)}`
+					}
+
+					logger.log(`[agent-as-tool] bg-lite started session=${bgSessionId} agent=${role}`)
+					return (
+						`Spawned agent_${role} in background (lite mode).\n\n` +
+						`**session_id**: ${bgSessionId}\n\n` +
+						'The agent is running asynchronously. Call this tool again with session_id to check results.'
+					)
+				} catch (err) {
+					logger.log(`[agent-as-tool] bg-lite error: ${err instanceof Error ? err.message : err}`)
+					return `agent_${role} background error: ${err instanceof Error ? err.message : String(err)}`
+				}
+			}
+
+			// ── Sync delegation (promptAsync + poll) ───────────────────
 			try {
 				let sessionId: string
 
 				if (args.session_id) {
-					// ── Continuation: reuse existing session ──
 					sessionId = args.session_id
 
-					// Verify session still exists
-					const sessResult = await v2.session.get({ sessionID: sessionId })
+					const sessResult = await client.session.get({ path: { id: sessionId }, query: { directory } })
 					if (sessResult.error || !sessResult.data) {
 						return `Session ${sessionId} not found or expired. Start a new conversation by omitting session_id.`
 					}
 
 					logger.log(`[agent-as-tool] continuing session=${sessionId} agent=${role}`)
 				} else {
-					// ── New child session ──
-					// Use parentID to create a proper child session per OpenCode docs
-					// @see https://opencode.ai/docs/agents — "When subagents create child sessions"
-					const createResult = await v2.session.create({
-						parentID: parentSessionID,
-						title: `agent_${role}: ${args.prompt.slice(0, 60)}`,
-						directory,
+					logger.log(`[agent-as-tool] creating child session for agent_${role}...`)
+					const createResult = await client.session.create({
+						body: {
+							parentID: parentSessionID,
+							title: `agent_${role}: ${args.prompt.slice(0, 60)}`,
+						},
+						query: { directory },
 					})
 
 					if (createResult.error || !createResult.data) {
+						logger.log(`[agent-as-tool] session create FAILED: ${JSON.stringify(createResult.error)}`)
 						return `Failed to create session for agent_${role}: ${JSON.stringify(createResult.error)}`
 					}
 
-					sessionId = createResult.data.id
-					logger.log(`[agent-as-tool] new child session=${sessionId} parent=${parentSessionID} agent=${role}`)
+					sessionId = (createResult.data as { id: string }).id
+					logger.log(`[agent-as-tool] child session created: ${sessionId} for agent_${role}`)
 				}
 
-				// Build the prompt — context only on first message
+				// Build the prompt
 				const fullPrompt =
 					!args.session_id && args.context ? `${args.context}\n\n---\n\n${args.prompt}` : args.prompt
 
-				// Resolve the agent's primary model and fallback chain from config
+				// Resolve the agent's fallback chain from config (for post-idle retry)
 				const agentOverride = ctx.config.agents?.[role]
-				const primaryModel = parseModelString(agentOverride?.model)
 				const fallbackModels = resolveFallbackModelEntries(agentOverride?.fallback_models)
 
-				// Use retryWithModelFallback to walk the model chain on failure,
-				// matching the same resilience that loop.ts provides.
-				const { result: promptResult, usedModel } = await retryWithModelFallback(
-					candidate =>
-						v2.session.prompt({
-							sessionID: sessionId,
-							directory,
-							agent: role,
-							parts: [{ type: 'text' as const, text: fullPrompt }],
-							model: candidate,
-						}),
-					() =>
-						v2.session.prompt({
-							sessionID: sessionId,
-							directory,
-							agent: role,
-							parts: [{ type: 'text' as const, text: fullPrompt }],
-						}),
-					primaryModel,
-					logger,
-					{ fallbackModels, maxRetries: 2 },
+				logger.log(
+					`[agent-as-tool] firing promptAsync for agent_${role} session=${sessionId} model=${agentOverride?.model ?? '(agent-config)'} fallbacks=${fallbackModels.length}`,
 				)
 
-				if (usedModel && primaryModel && usedModel.modelID !== primaryModel.modelID) {
+				// --- Helper: send prompt + poll until idle -----------------
+				const sendAndPoll = async (
+					modelOverride?: { providerID: string; modelID: string },
+				): Promise<{ ok: boolean; assistantText: string | null }> => {
+					const body: Record<string, unknown> = {
+						agent: role,
+						parts: [{ type: 'text' as const, text: fullPrompt }],
+					}
+					if (modelOverride) body.model = modelOverride
+
+					const res = await client.session.promptAsync({
+						path: { id: sessionId },
+						body: body as { agent: string; parts: Array<{ type: 'text'; text: string }> },
+						query: { directory },
+					})
+					if (res.error) return { ok: false, assistantText: null }
+
+					// Poll for idle
+					const POLL_MS = 2_000
+					const MAX_MS = 5 * 60 * 1_000
+					const t0 = Date.now()
+					while (Date.now() - t0 < MAX_MS) {
+						await new Promise(r => setTimeout(r, POLL_MS))
+						try {
+							const sr = await client.session.status({ query: { directory } })
+							if (!sr.error && sr.data) {
+								const ss = (sr.data as Record<string, { type: string }>)[sessionId]
+								if (!ss || ss.type === 'idle') {
+									logger.log(
+										`[agent-as-tool] agent_${role} session=${sessionId} reached idle after ${Date.now() - t0}ms`,
+									)
+									break
+								}
+							}
+						} catch {
+							/* continue polling */
+						}
+					}
+
+					// Check for assistant response
+					const mr = await client.session.messages({
+						path: { id: sessionId },
+						query: { directory, limit: 10 },
+					})
+					const msgs = (mr.data ?? []) as Array<{
+						info: { role?: string }
+						parts: Array<{ type: string; text?: string }>
+					}>
+					const aMsg = [...msgs].reverse().find(m => m.info.role === 'assistant')
+					const text = aMsg ? extractPartsText(aMsg.parts) : null
+					return { ok: !!text, assistantText: text }
+				}
+
+				// --- 1. Initial attempt (no model override → uses agent config) ---
+				let result = await sendAndPoll()
+
+				// --- 2. Post-idle fallback: if no response, the server-side model
+				//     likely failed (e.g. ProviderModelNotFoundError). Retry with
+				//     each fallback model until one succeeds. -----------------------
+				if (!result.ok && fallbackModels.length > 0) {
 					logger.log(
-						`[agent-as-tool] agent_${role} used fallback model ${usedModel.providerID}/${usedModel.modelID}`,
+						`[agent-as-tool] agent_${role} no response — trying ${fallbackModels.length} fallback model(s)`,
 					)
+					for (const fb of fallbackModels) {
+						logger.log(`[agent-as-tool] agent_${role} retrying with fallback ${fb.providerID}/${fb.modelID}`)
+						result = await sendAndPoll(fb)
+						if (result.ok) break
+					}
 				}
 
-				if (promptResult.error) {
-					return `agent_${role} prompt failed: ${JSON.stringify(promptResult.error)}`
-				}
-
-				// Extract text from the response parts
-				const data = promptResult.data as {
-					info: Record<string, unknown>
-					parts: Array<{ type: string; text?: string }>
-				} | null
-				if (!data) {
+				if (!result.assistantText) {
 					return (
-						`agent_${role} returned no response.\n\n` +
+						`agent_${role} finished but returned no assistant response (model may be unavailable).\n\n` +
 						`**session_id**: ${sessionId}\n` +
 						'Call this tool again with session_id to send a follow-up.'
 					)
 				}
 
-				const responseText = extractPartsText(data.parts)
-				const output = responseText.slice(0, MAX_OUTPUT_CHARS)
-				const truncated = responseText.length > MAX_OUTPUT_CHARS ? '\n\n[output truncated]' : ''
+				const output = result.assistantText.slice(0, MAX_OUTPUT_CHARS)
+				const truncated = result.assistantText.length > MAX_OUTPUT_CHARS ? '\n\n[output truncated]' : ''
 
 				return (
 					`${output}${truncated}\n\n---\n` +
@@ -230,10 +319,9 @@ function createAgentTool(
 
 /**
  * Continue a background session by sending a new prompt to an existing session.
- * Uses promptAsync since background tasks are fire-and-forget.
  */
 async function continueBackgroundSession(
-	v2: ToolContext['v2'],
+	client: SdkClient,
 	directory: string,
 	role: string,
 	args: { prompt: string; session_id?: string },
@@ -241,11 +329,13 @@ async function continueBackgroundSession(
 	const sessionId = args.session_id!
 
 	try {
-		const promptResult = await v2.session.promptAsync({
-			sessionID: sessionId,
-			directory,
-			agent: role,
-			parts: [{ type: 'text' as const, text: args.prompt }],
+		const promptResult = await client.session.promptAsync({
+			path: { id: sessionId },
+			body: {
+				agent: role,
+				parts: [{ type: 'text' as const, text: args.prompt }],
+			},
+			query: { directory },
 		})
 
 		if (promptResult.error) {
