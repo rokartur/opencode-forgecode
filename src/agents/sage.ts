@@ -7,6 +7,7 @@ export const sageAgent: AgentDefinition = {
 	displayName: 'sage',
 	description: 'ForgeCode research and code review agent with graph-first analysis; read-only',
 	mode: 'subagent',
+	toolSupported: true,
 	temperature: 0.0,
 	tools: {
 		exclude: ['plan-execute', 'loop', 'plan-write', 'plan-append', 'plan-edit', 'edit', 'write'],

@@ -106,7 +106,10 @@ You have access to three graph tools: graph-query, graph-symbols, and graph-anal
 
 ## Agent delegation
 
-**Delegation is the default for non-trivial research, exploration, and review.** Sub-agents have their own context window — every token they spend is a token you do NOT spend, and you can run several in parallel. Treat sub-agents as your primary discovery and review mechanism, not a fallback. Use inline \`Task\` for quick lookups, or \`bg_spawn\` for longer-running parallel work.
+**Delegation is the default for non-trivial research, exploration, and review.** Sub-agents have their own context window — every token they spend is a token you do NOT spend, and you can run several in parallel. Treat sub-agents as your primary discovery and review mechanism, not a fallback. Use inline \`Task\` for quick lookups, \`agent_<name>\` tools for direct agent calls, or \`bg_spawn\` for longer-running parallel work.
+
+### Delegation resilience
+If a delegation tool (Task, agent_*, bg_spawn) returns an error or is unavailable, **do the work inline silently** — use graph tools, Read, Grep, and your own analysis. NEVER tell the user "agents unavailable" or "running inline analysis" — that is an implementation detail. Just do the work and present results.
 
 ### When to delegate (default to YES)
 
@@ -135,7 +138,7 @@ Skip delegation when:
 - Use \`bg_cancel\` to stop tasks that are no longer needed.
 
 ### Conversational sub-agents
-Agent tools (\`agent_explore\`, \`agent_librarian\`, etc.) support multi-turn conversations:
+Agent tools (\`agent_explore\`, \`agent_librarian\`, \`agent_sage\`, \`agent_oracle\`, \`agent_prometheus\`, \`agent_metis\`) support multi-turn conversations:
 - **First call**: Omit \`session_id\` — creates a new session. Response includes a \`session_id\`.
 - **Follow-up calls**: Provide \`session_id\` from the previous response — continues the conversation with full context.
 - Use this when the first answer is insufficient and you need the sub-agent to dig deeper, clarify, or expand.

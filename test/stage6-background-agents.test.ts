@@ -372,7 +372,7 @@ describe('Agent registry', () => {
 	})
 
 	test('toolSupported flags are correct', () => {
-		const supportedRoles = ['librarian', 'explore', 'oracle', 'prometheus', 'metis']
+		const supportedRoles = ['librarian', 'explore', 'oracle', 'prometheus', 'metis', 'sage']
 		for (const role of supportedRoles) {
 			expect(agents[role as AgentRole].toolSupported).toBe(true)
 		}
