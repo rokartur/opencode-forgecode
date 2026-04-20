@@ -166,28 +166,18 @@ export function createAstTools(ctx: ToolContext): Record<string, ReturnType<type
 				const unavailable = ensureSg()
 				if (unavailable) return UNAVAILABLE_MSG
 
-				const sgArgs = ['run', '--pattern', args.pattern, '--rewrite', args.rewrite, '--lang', args.lang]
-
-				if (!args.apply) {
-					// Dry run mode — just show what would change
-					sgArgs.push('--json')
-				} else {
-					sgArgs.push('--update-all')
-				}
-
-				if (args.path) {
-					sgArgs.push(args.path)
-				}
-
 				logger.log(
 					`[ast-rewrite] pattern="${args.pattern}" rewrite="${args.rewrite}" lang=${args.lang} apply=${args.apply}`,
 				)
-				const result = runSg(sgArgs, directory)
-
-				if (!result.ok) return `ast-rewrite error: ${result.error}`
 
 				if (!args.apply) {
-					// Parse JSON output for preview
+					// Dry run mode — JSON output shows what would change
+					const sgArgs = ['run', '--pattern', args.pattern, '--rewrite', args.rewrite, '--lang', args.lang, '--json']
+					if (args.path) sgArgs.push(args.path)
+
+					const result = runSg(sgArgs, directory)
+					if (!result.ok) return `ast-rewrite error: ${result.error}`
+
 					try {
 						const matches = JSON.parse(result.stdout) as Array<{
 							text: string
@@ -213,9 +203,45 @@ export function createAstTools(ctx: ToolContext): Record<string, ReturnType<type
 					}
 				}
 
-				return result.stdout
-					? `Applied rewrites:\n${result.stdout.slice(0, 4000)}`
-					: 'Rewrites applied successfully (no diff output).'
+				// Apply mode: first dry-run to get affected files/counts, then apply
+				const dryArgs = ['run', '--pattern', args.pattern, '--rewrite', args.rewrite, '--lang', args.lang, '--json']
+				if (args.path) dryArgs.push(args.path)
+				const dryResult = runSg(dryArgs, directory)
+
+				let matchSummary = ''
+				const affectedFiles = new Set<string>()
+				if (dryResult.ok) {
+					try {
+						const matches = JSON.parse(dryResult.stdout) as Array<{
+							text: string
+							replacement: string
+							file: string
+							range: { start: { line: number } }
+						}>
+						if (matches.length === 0) return 'No matches found for the pattern.'
+						for (const m of matches) affectedFiles.add(m.file)
+						const fileList = [...affectedFiles].slice(0, 15).map(f => `  - ${f}`).join('\n')
+						matchSummary = `${matches.length} match(es) in ${affectedFiles.size} file(s):\n${fileList}`
+						if (affectedFiles.size > 15) matchSummary += `\n  ... and ${affectedFiles.size - 15} more files`
+					} catch {
+						// Fall through to apply anyway
+					}
+				}
+
+				const applyArgs = ['run', '--pattern', args.pattern, '--rewrite', args.rewrite, '--lang', args.lang, '--update-all']
+				if (args.path) applyArgs.push(args.path)
+				const applyResult = runSg(applyArgs, directory)
+
+				if (!applyResult.ok) return `ast-rewrite apply error: ${applyResult.error}`
+
+				const output = matchSummary
+					? `Applied rewrites — ${matchSummary}`
+					: applyResult.stdout
+						? `Applied rewrites:\n${applyResult.stdout.slice(0, 4000)}`
+						: 'Rewrites applied successfully.'
+
+				logger.log(`[ast-rewrite] applied: ${affectedFiles.size} files affected`)
+				return output
 			},
 		}),
 	}

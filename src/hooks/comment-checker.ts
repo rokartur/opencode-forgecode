@@ -11,7 +11,7 @@
 import { CommentChecker } from '../runtime/comment-checker'
 import type { CommentCheckerConfig, Logger, PluginConfig } from '../types'
 
-const MUTATING_TOOLS = new Set(['write', 'edit', 'patch', 'multi_patch'])
+const MUTATING_TOOLS = new Set(['write', 'edit', 'patch', 'multi_patch', 'ast-rewrite'])
 
 export interface CommentCheckerHooks {
 	/** Call from tool.execute.after — appends warning to output when slop detected. */

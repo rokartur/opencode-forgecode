@@ -25,7 +25,7 @@ import {
 	type ForgePendingTodo,
 } from '../harness'
 
-const MUTATING_TOOLS = new Set(['write', 'edit', 'multi_patch', 'patch'])
+const MUTATING_TOOLS = new Set(['write', 'edit', 'multi_patch', 'patch', 'ast-rewrite'])
 
 /** Cap on any callback into opencode (TUI append) — prevents hook from ever blocking a tool call. */
 const APPEND_PROMPT_TIMEOUT_MS = 2_000

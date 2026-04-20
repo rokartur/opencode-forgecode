@@ -308,6 +308,34 @@ function extractMutatedPaths(tool: string, output: string, args: unknown): strin
 		}
 	}
 
+	// Handle plugin patch / multi_patch tools — both use `file` arg
+	if (tool === 'patch' || tool === 'multi_patch') {
+		const argsObj = args as Record<string, unknown> | undefined
+		const file = argsObj?.file
+		if (file && typeof file === 'string') {
+			paths.push(file)
+		}
+	}
+
+	// Handle plugin ast-rewrite — may touch multiple files; parse output for paths
+	if (tool === 'ast-rewrite' && output) {
+		const argsObj = args as Record<string, unknown> | undefined
+		// When apply=true, output contains file paths. Also check path arg for scoping.
+		const pathArg = argsObj?.path
+		if (pathArg && typeof pathArg === 'string') {
+			paths.push(pathArg)
+		}
+		// Parse "Applied rewrites" output or JSON matches for affected file paths
+		const fileRefRegex = /\*\*([^*:]+(?:\.[a-zA-Z]+))(?::|\*)/g
+		let match: RegExpExecArray | null
+		while ((match = fileRefRegex.exec(output)) !== null) {
+			const file = match[1].trim()
+			if (file && !paths.includes(file)) {
+				paths.push(file)
+			}
+		}
+	}
+
 	return paths
 }
 
