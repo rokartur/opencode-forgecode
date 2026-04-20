@@ -16,12 +16,12 @@ const z = tool.schema
  *
  * 8 KB is comfortably below the threshold where popular providers start
  * timing out mid-stream for typical model throughput, and still leaves room
- * for multi-line refactors. For larger rewrites the model should use `edit`
- * (targeted find/replace) or `write` (whole file) instead.
+ * for multi-line refactors. For larger rewrites the model should split into
+ * multiple successive `patch` calls or use `ast-rewrite` for structural changes.
  */
 const MAX_PATCH_PAYLOAD_BYTES = 8_000
-/** Per-patch cap: any single `newContent` larger than this is almost certainly
- *  better expressed as an `edit` or `write`. */
+/** Per-patch cap: any single `newContent` larger than this should be split
+ *  into multiple `patch` calls or handled via `ast-rewrite`. */
 const MAX_SINGLE_PATCH_BYTES = 4_000
 
 export function createPatchTools(ctx: ToolContext): Record<string, ReturnType<typeof tool>> {
@@ -33,7 +33,7 @@ export function createPatchTools(ctx: ToolContext): Record<string, ReturnType<ty
 	return {
 		patch: tool({
 			description:
-				'Apply small, hash-anchored line or range replacements atomically. Use ONLY for targeted edits where `newContent` is SHORT (≤ a few lines, ≤ ~4 KB per patch, ≤ ~8 KB total). For rewriting a function body, moving large blocks, inserting many lines, or any refactor beyond a handful of lines, prefer `edit` (find/replace) or `write` (whole file) — otherwise the provider will time out mid-stream and the tool call will abort with "The operation timed out". Fails if any anchor hash does not match the current file.',
+				'Apply small, hash-anchored line or range replacements atomically. Use ONLY for targeted edits where `newContent` is SHORT (≤ a few lines, ≤ ~4 KB per patch, ≤ ~8 KB total). For rewriting a function body, moving large blocks, inserting many lines, or any refactor beyond a handful of lines, split into multiple successive `patch` calls or use `ast-rewrite` for structural changes — otherwise the provider will time out mid-stream and the tool call will abort with "The operation timed out". Fails if any anchor hash does not match the current file.',
 			args: {
 				file: z.string().describe('Absolute or workspace-relative path to the file to patch.'),
 				patches: z
@@ -49,18 +49,18 @@ export function createPatchTools(ctx: ToolContext): Record<string, ReturnType<ty
 					.describe('Ordered list of anchored replacements to apply. Keep each newContent small (≤ ~4 KB).'),
 			},
 			execute: async args => {
-				// Reject oversized payloads up-front to steer the model toward `edit`/`write`
-				// instead of streaming a huge tool-call that the provider will time out on.
+				// Reject oversized payloads up-front to steer the model toward splitting
+				// into multiple calls or using `ast-rewrite` for structural changes.
 				let totalBytes = 0
 				for (let i = 0; i < args.patches.length; i++) {
 					const bytes = Buffer.byteLength(args.patches[i].newContent, 'utf8')
 					if (bytes > MAX_SINGLE_PATCH_BYTES) {
-						return `ERROR: patch ${i + 1}/${args.patches.length} newContent too large (${bytes} bytes > ${MAX_SINGLE_PATCH_BYTES}). Use the \`edit\` tool for targeted find/replace, or \`write\` to rewrite the whole file.`
+						return `ERROR: patch ${i + 1}/${args.patches.length} newContent too large (${bytes} bytes > ${MAX_SINGLE_PATCH_BYTES}). Split into multiple \`patch\` calls targeting smaller ranges, or use \`ast-rewrite\` for structural changes.`
 					}
 					totalBytes += bytes
 				}
 				if (totalBytes > MAX_PATCH_PAYLOAD_BYTES) {
-					return `ERROR: patch payload too large (${totalBytes} bytes > ${MAX_PATCH_PAYLOAD_BYTES}). Use the \`edit\` tool for targeted find/replace, or \`write\` to rewrite the whole file.`
+					return `ERROR: patch payload too large (${totalBytes} bytes > ${MAX_PATCH_PAYLOAD_BYTES}). Split into multiple \`patch\` calls targeting smaller ranges, or use \`ast-rewrite\` for structural changes.`
 				}
 
 				const absPath = args.file.startsWith('/') ? args.file : join(directory, args.file)
