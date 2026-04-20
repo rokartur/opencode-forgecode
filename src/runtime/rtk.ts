@@ -17,10 +17,73 @@
  * swallowed so a missing RTK never blocks startup.
  */
 
+import { existsSync } from 'fs'
+import { join } from 'path'
 import { spawn, spawnSync } from 'child_process'
 import type { Logger, RtkConfig } from '../types'
 
 const DEFAULT_INSTALL_URL = 'https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh'
+
+/**
+ * Common install locations for the `rtk` binary. Checked when `which rtk`
+ * fails (e.g. the Node / extension-host process inherited a minimal PATH
+ * that doesn't include the user's shell profile additions).
+ */
+const COMMON_RTK_PATHS: string[] = (() => {
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
+	if (!home) return []
+	return [
+		join(home, '.local', 'bin', 'rtk'),
+		join(home, '.rtk', 'bin', 'rtk'),
+		join(home, '.cargo', 'bin', 'rtk'),
+		'/usr/local/bin/rtk',
+	]
+})()
+
+/**
+ * Resolve the absolute path to the `rtk` binary. Returns `null` when the
+ * binary cannot be found either on PATH or in common install locations.
+ */
+export function resolveRtkPath(): string | null {
+	// 1. Try PATH first (covers the happy path).
+	const whichCommand = process.platform === 'win32' ? 'where' : 'which'
+	const result = spawnSync(whichCommand, ['rtk'], {
+		stdio: ['ignore', 'pipe', 'ignore'],
+		timeout: 3_000,
+	})
+	if (result.status === 0 && result.stdout) {
+		const resolved = result.stdout.toString().trim().split('\n')[0]
+		if (resolved) return resolved
+	}
+
+	// 2. Fallback — check common install directories.
+	for (const candidate of COMMON_RTK_PATHS) {
+		if (existsSync(candidate)) return candidate
+	}
+
+	return null
+}
+
+/** Cached resolved path (computed once per process). */
+let _cachedRtkPath: string | null | undefined
+
+/** Get the resolved rtk path, caching the result. */
+function getCachedRtkPath(): string | null {
+	if (_cachedRtkPath === undefined) {
+		_cachedRtkPath = resolveRtkPath()
+	}
+	return _cachedRtkPath
+}
+
+/** Invalidate the cached rtk path (e.g. after install). */
+export function invalidateRtkPathCache(): void {
+	_cachedRtkPath = undefined
+}
+
+/** Whether `rtk` binary is reachable on PATH or in common install locations. */
+export function isRtkInstalled(): boolean {
+	return getCachedRtkPath() !== null
+}
 
 /** Short instruction snippet injected into agent sessions. */
 export const RTK_INSTRUCTION_BLOCK = `# RTK - Rust Token Killer
@@ -57,11 +120,66 @@ which rtk
 \`\`\`
 `
 
-/** Whether `rtk` binary is reachable on PATH. */
-export function isRtkInstalled(): boolean {
+/**
+ * Build the RTK instruction block with optional PATH-setup hint.
+ * When the binary was found outside of PATH, the instruction tells
+ * the agent to export the parent directory so subsequent commands work.
+ */
+export function buildRtkInstructionBlock(): string {
+	const rtkPath = getCachedRtkPath()
+	if (!rtkPath) return RTK_INSTRUCTION_BLOCK
+
+	// Check whether the resolved path is already on PATH.
 	const whichCommand = process.platform === 'win32' ? 'where' : 'which'
-	const result = spawnSync(whichCommand, ['rtk'], { stdio: 'ignore' })
-	return result.status === 0
+	const onPath = spawnSync(whichCommand, ['rtk'], { stdio: 'ignore', timeout: 3_000 })
+	if (onPath.status === 0) return RTK_INSTRUCTION_BLOCK
+
+	// Not on PATH — prepend a setup preamble with the discovered directory.
+	const rtkDir = rtkPath.replace(/\/rtk$/, '')
+	return `# RTK - Rust Token Killer
+
+**Usage**: Token-optimized CLI proxy for shell commands.
+
+## IMPORTANT — PATH setup
+
+\`rtk\` is installed at \`${rtkPath}\` but may not be on the shell PATH.
+Before using rtk, run this **once per shell session**:
+
+\`\`\`bash
+export PATH="${rtkDir}:$PATH"
+\`\`\`
+
+Alternatively, use the full path directly: \`${rtkPath}\`.
+
+## Rule
+
+Always prefix shell commands with \`rtk\` (or \`${rtkPath}\` if not on PATH).
+
+Examples:
+
+\`\`\`bash
+rtk git status
+rtk cargo test
+rtk npm run build
+rtk pytest -q
+\`\`\`
+
+## Meta Commands
+
+\`\`\`bash
+rtk gain            # Token savings analytics
+rtk gain --history  # Recent command savings history
+rtk proxy <cmd>     # Run raw command without filtering
+\`\`\`
+
+## Verification
+
+\`\`\`bash
+rtk --version
+rtk gain
+which rtk
+\`\`\`
+`
 }
 
 /** Resolve final RTK config with defaults applied. */
@@ -132,6 +250,8 @@ export async function ensureRtkInstalled(
 		return { installed: false, skipped: false, reason: `install-failed: ${message}` }
 	}
 
+	// Invalidate the path cache so the next check picks up the freshly installed binary.
+	invalidateRtkPathCache()
 	const nowInstalled = isRtkInstalled()
 	if (nowInstalled) {
 		logger.log('[rtk] install completed successfully')

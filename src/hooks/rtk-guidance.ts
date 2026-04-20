@@ -3,15 +3,19 @@
  * sessions instructing them to prefix shell commands with `rtk`
  * (the Rust Token Killer CLI proxy).
  *
- * The reminder is injected once per session, only for agents that
- * have shell access (i.e. bash-capable primary agents). Read-only
- * agents (librarian/explore/oracle/sage) don't run shell commands,
- * so they are skipped to avoid context noise.
+ * The reminder is injected once per session for every agent that has
+ * shell/Bash access. Agents whose tool set is restricted to read-only
+ * tools via an include-list (librarian, explore, oracle, metis) are
+ * skipped to avoid context noise.
+ *
+ * When `rtk` is installed outside the process PATH (e.g. ~/.local/bin),
+ * the instruction block includes an `export PATH` preamble so agents
+ * can locate the binary in spawned shells.
  *
  * See `src/runtime/rtk.ts` for the installer and raw instruction text.
  */
 
-import { RTK_INSTRUCTION_BLOCK, isRtkInstalled, resolveRtkConfig } from '../runtime/rtk'
+import { buildRtkInstructionBlock, isRtkInstalled, resolveRtkConfig } from '../runtime/rtk'
 import type { Logger, PluginConfig } from '../types'
 
 export interface RtkGuidanceHooks {
@@ -23,10 +27,12 @@ export interface RtkGuidanceHooks {
 }
 
 /**
- * Agents that DO NOT need the RTK guidance. These are read-only or
- * orchestration-only agents that don't directly run shell commands.
+ * Agents that DO NOT need the RTK guidance. Only agents that have
+ * NO shell/Bash access at all (include-list without Bash) are skipped.
+ * Agents with shell access (even read-only ones like sage/muse that
+ * run git commands) MUST receive RTK guidance.
  */
-const SKIP_AGENTS = new Set(['librarian', 'explore', 'oracle', 'sage', 'metis', 'muse'])
+const SKIP_AGENTS = new Set(['librarian', 'explore', 'oracle', 'metis'])
 
 export function createRtkGuidanceHooks(logger: Logger, config: PluginConfig): RtkGuidanceHooks {
 	const resolved = resolveRtkConfig(config.rtk)
@@ -56,7 +62,7 @@ export function createRtkGuidanceHooks(logger: Logger, config: PluginConfig): Rt
 				sessionID: input.sessionID,
 				messageID: input.messageID ?? '',
 				type: 'text',
-				text: RTK_INSTRUCTION_BLOCK,
+				text: buildRtkInstructionBlock(),
 				synthetic: true,
 			})
 			logger.log(`[rtk-guidance] injected RTK instructions for agent '${agent}' in session ${input.sessionID}`)

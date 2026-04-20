@@ -5,6 +5,7 @@ import { initializeDatabase, closeDatabase, resolveDataDir } from '../../storage
 import { loadPluginConfig, resolveConfigPath } from '../../setup'
 import { collectUnsupportedConfigIssues, getCapabilityDescriptors } from '../../runtime/feature-support'
 import { parseModelString, resolveFallbackModelEntries } from '../../utils/model-fallback'
+import { resolveRtkPath } from '../../runtime/rtk'
 import type { PluginConfig } from '../../types'
 
 type CheckStatus = 'OK' | 'WARN' | 'FAIL'
@@ -186,11 +187,12 @@ function checkOptionalBinaries(config: PluginConfig): CheckResult[] {
 	// RTK (Rust Token Killer) — optional CLI proxy for token-optimized shell output.
 	const rtkEnabled = config.rtk?.enabled ?? true
 	if (rtkEnabled) {
-		if (commandExists('rtk')) {
+		const rtkPath = resolveRtkPath()
+		if (rtkPath) {
 			checks.push({
 				label: 'RTK (Rust Token Killer)',
 				status: 'OK',
-				detail: '`rtk` available on PATH. Agents will be instructed to prefix shell commands with `rtk`.',
+				detail: `\`rtk\` found at \`${rtkPath}\`. Agents will be instructed to prefix shell commands with \`rtk\`.`,
 			})
 		} else {
 			const autoInstall = config.rtk?.autoInstall ?? true

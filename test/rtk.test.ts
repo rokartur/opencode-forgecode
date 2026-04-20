@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { resolveRtkConfig, RTK_INSTRUCTION_BLOCK, isRtkInstalled, ensureRtkInstalled } from '../src/runtime/rtk'
+import { resolveRtkConfig, RTK_INSTRUCTION_BLOCK, buildRtkInstructionBlock, isRtkInstalled, ensureRtkInstalled, resolveRtkPath, invalidateRtkPathCache } from '../src/runtime/rtk'
 import { createRtkGuidanceHooks } from '../src/hooks/rtk-guidance'
 import type { Logger } from '../src/types'
 
@@ -37,6 +37,31 @@ describe('RTK_INSTRUCTION_BLOCK', () => {
 		expect(RTK_INSTRUCTION_BLOCK).toContain('rtk gain')
 		expect(RTK_INSTRUCTION_BLOCK).toContain('rtk proxy <cmd>')
 		expect(RTK_INSTRUCTION_BLOCK).toContain('rtk --version')
+	})
+})
+
+describe('resolveRtkPath', () => {
+	it('returns a path string when rtk is installed', () => {
+		if (!isRtkInstalled()) return
+		const p = resolveRtkPath()
+		expect(p).not.toBeNull()
+		expect(typeof p).toBe('string')
+		expect(p!.endsWith('rtk')).toBe(true)
+	})
+})
+
+describe('buildRtkInstructionBlock', () => {
+	it('contains the core RTK instruction content', () => {
+		const block = buildRtkInstructionBlock()
+		expect(block).toContain('RTK - Rust Token Killer')
+		expect(block).toContain('rtk gain')
+		expect(block).toContain('rtk proxy <cmd>')
+	})
+})
+
+describe('invalidateRtkPathCache', () => {
+	it('can be called without throwing', () => {
+		expect(() => invalidateRtkPathCache()).not.toThrow()
 	})
 })
 
@@ -89,16 +114,30 @@ describe('createRtkGuidanceHooks', () => {
 		expect(output.parts.length).toBe(0)
 	})
 
-	it('does not inject for read-only agents', () => {
+	it('does not inject for agents without shell access', () => {
 		const { logger } = makeLogger()
 		const hooks = createRtkGuidanceHooks(logger, { rtk: { enabled: true } })
 		const output: { parts: Array<Record<string, unknown>> } = { parts: [] }
 		hooks.onMessage({ sessionID: 's1', agent: 'librarian' }, output)
 		hooks.onMessage({ sessionID: 's1', agent: 'explore' }, output)
 		hooks.onMessage({ sessionID: 's1', agent: 'oracle' }, output)
-		hooks.onMessage({ sessionID: 's1', agent: 'sage' }, output)
 		hooks.onMessage({ sessionID: 's1', agent: 'metis' }, output)
 		expect(output.parts.length).toBe(0)
+	})
+
+	it('injects RTK instructions for shell-capable agents including sage and muse', () => {
+		if (!isRtkInstalled()) return // only meaningful when rtk is present
+		const { logger } = makeLogger()
+		const hooks = createRtkGuidanceHooks(logger, { rtk: { enabled: true } })
+		const sageOutput: { parts: Array<Record<string, unknown>> } = { parts: [] }
+		hooks.onMessage({ sessionID: 'sage-test', agent: 'sage' }, sageOutput)
+		expect(sageOutput.parts.length).toBe(1)
+		expect((sageOutput.parts[0] as { text: string }).text).toContain('RTK')
+
+		const museOutput: { parts: Array<Record<string, unknown>> } = { parts: [] }
+		hooks.onMessage({ sessionID: 'muse-test', agent: 'muse' }, museOutput)
+		expect(museOutput.parts.length).toBe(1)
+		expect((museOutput.parts[0] as { text: string }).text).toContain('RTK')
 	})
 
 	it('injects RTK instructions once per session for shell-capable agents when rtk is installed', () => {
@@ -114,7 +153,7 @@ describe('createRtkGuidanceHooks', () => {
 		expect(output.parts.length).toBe(1)
 	})
 
-	it('skips injection when rtk is missing from PATH', () => {
+	it('skips injection when rtk is missing from PATH and common locations', () => {
 		if (isRtkInstalled()) return // only meaningful when rtk is absent
 		const { logger } = makeLogger()
 		const hooks = createRtkGuidanceHooks(logger, { rtk: { enabled: true } })
