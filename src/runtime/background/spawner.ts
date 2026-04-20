@@ -13,6 +13,12 @@ import type { createOpencodeClient as createV2Client } from '@opencode-ai/sdk/v2
 import type { BackgroundManager, BackgroundTask } from './manager'
 import type { ConcurrencyManager } from './concurrency'
 import { DEFAULT_POLL_INTERVAL_MS, DEFAULT_IDLE_TIMEOUT_MS } from '../../constants/background'
+import {
+	parseModelString,
+	resolveFallbackModelEntries,
+	retryWithModelFallback,
+} from '../../utils/model-fallback'
+import type { FallbackEntry } from '../../types'
 
 export interface SpawnerConfig {
 	pollIntervalMs?: number
@@ -29,6 +35,8 @@ export class BackgroundSpawner {
 	private pollTimer: ReturnType<typeof setInterval> | null = null
 	/** Last known output hash per task — used for idle detection. */
 	private lastOutputHash = new Map<string, { hash: string; since: number }>()
+	/** Fallback model chains stashed per task, consumed by startTask. */
+	private taskFallbacks = new Map<string, Array<string | FallbackEntry>>()
 	private readonly pollIntervalMs: number
 	private readonly idleTimeoutMs: number
 	private readonly onTaskEvent?: SpawnerConfig['onTaskEvent']
@@ -71,8 +79,14 @@ export class BackgroundSpawner {
 		prompt: string
 		context?: string
 		model: string
+		fallbackModels?: Array<string | FallbackEntry>
 	}): Promise<BackgroundTask> {
 		const task = this.bgManager.enqueue(params)
+
+		// Stash fallback models for use in startTask
+		if (params.fallbackModels?.length) {
+			this.taskFallbacks.set(task.id, params.fallbackModels)
+		}
 
 		// Try to start immediately
 		if (this.concurrency.canStart(task.model)) {
@@ -146,12 +160,39 @@ export class BackgroundSpawner {
 
 			const fullPrompt = task.context ? `${task.context}\n\n---\n\n${task.prompt}` : task.prompt
 
-			const promptResult = await this.v2.session.promptAsync({
-				sessionID: sessionId,
-				directory: this.directory,
-				agent: task.targetAgent,
-				parts: [{ type: 'text' as const, text: fullPrompt }],
-			})
+			// Resolve model and fallbacks for the prompt
+			const primaryModel = parseModelString(task.model)
+			const fallbacks = this.taskFallbacks.get(taskId)
+			const fallbackModels = resolveFallbackModelEntries(fallbacks)
+			this.taskFallbacks.delete(taskId)
+
+			const promptParts = [{ type: 'text' as const, text: fullPrompt }]
+			const { result: promptResult, usedModel } = await retryWithModelFallback(
+				candidate =>
+					this.v2.session.promptAsync({
+						sessionID: sessionId,
+						directory: this.directory,
+						agent: task.targetAgent,
+						model: candidate,
+						parts: promptParts,
+					}),
+				() =>
+					this.v2.session.promptAsync({
+						sessionID: sessionId,
+						directory: this.directory,
+						agent: task.targetAgent,
+						parts: promptParts,
+					}),
+				primaryModel,
+				{ error: (msg: string, err?: unknown) => this.logger.log(msg, err), log: (msg: string) => this.logger.log(msg) },
+				{ fallbackModels, maxRetries: 2 },
+			)
+
+			if (usedModel && primaryModel && usedModel.modelID !== primaryModel.modelID) {
+				this.logger.log(
+					`[bg-spawner] task=${taskId} used fallback model ${usedModel.providerID}/${usedModel.modelID}`,
+				)
+			}
 
 			if (promptResult.error) {
 				this.bgManager.markError(taskId, `Prompt failed: ${JSON.stringify(promptResult.error)}`)

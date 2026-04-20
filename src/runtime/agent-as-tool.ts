@@ -98,6 +98,10 @@ function createAgentTool(
 					return continueBackgroundSession(v2, directory, role, args)
 				}
 
+				// Resolve the agent's model for concurrency accounting and prompt
+				const bgAgentOverride = ctx.config.agents?.[role]
+				const bgModelStr = bgAgentOverride?.model || role
+
 				const id = `at-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 				const task = await bgSpawner.spawn({
 					id,
@@ -105,7 +109,8 @@ function createAgentTool(
 					targetAgent: role,
 					prompt: args.prompt,
 					context: args.context,
-					model: role,
+					model: bgModelStr,
+					fallbackModels: bgAgentOverride?.fallback_models,
 				})
 
 				return (
