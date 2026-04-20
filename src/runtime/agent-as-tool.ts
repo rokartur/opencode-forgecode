@@ -22,6 +22,11 @@ import { tool } from '@opencode-ai/plugin'
 import { agents, type AgentDefinition } from '../agents'
 import type { ToolContext } from '../tools/types'
 import type { BackgroundSpawner } from '../runtime/background/spawner'
+import {
+	parseModelString,
+	resolveFallbackModelEntries,
+	retryWithModelFallback,
+} from '../utils/model-fallback'
 
 const z = tool.schema
 
@@ -150,15 +155,39 @@ function createAgentTool(
 				const fullPrompt =
 					!args.session_id && args.context ? `${args.context}\n\n---\n\n${args.prompt}` : args.prompt
 
-				// Use sync session.prompt() — waits for full response
-				// Returns { info: AssistantMessage, parts: Part[] }
-				// @see https://opencode.ai/docs/sdk — session.prompt()
-				const promptResult = await v2.session.prompt({
-					sessionID: sessionId,
-					directory,
-					agent: role,
-					parts: [{ type: 'text' as const, text: fullPrompt }],
-				})
+				// Resolve the agent's primary model and fallback chain from config
+				const agentOverride = ctx.config.agents?.[role]
+				const primaryModel = parseModelString(agentOverride?.model)
+				const fallbackModels = resolveFallbackModelEntries(agentOverride?.fallback_models)
+
+				// Use retryWithModelFallback to walk the model chain on failure,
+				// matching the same resilience that loop.ts provides.
+				const { result: promptResult, usedModel } = await retryWithModelFallback(
+					candidate =>
+						v2.session.prompt({
+							sessionID: sessionId,
+							directory,
+							agent: role,
+							parts: [{ type: 'text' as const, text: fullPrompt }],
+							model: candidate,
+						}),
+					() =>
+						v2.session.prompt({
+							sessionID: sessionId,
+							directory,
+							agent: role,
+							parts: [{ type: 'text' as const, text: fullPrompt }],
+						}),
+					primaryModel,
+					logger,
+					{ fallbackModels, maxRetries: 2 },
+				)
+
+				if (usedModel && primaryModel && usedModel.modelID !== primaryModel.modelID) {
+					logger.log(
+						`[agent-as-tool] agent_${role} used fallback model ${usedModel.providerID}/${usedModel.modelID}`,
+					)
+				}
 
 				if (promptResult.error) {
 					return `agent_${role} prompt failed: ${JSON.stringify(promptResult.error)}`
